@@ -15,7 +15,7 @@ from matgl.layers._core import MLP, GatedMLP
 from matgl.layers._core_dgl import GatedMLPNorm
 from matgl.layers._norm import GraphNorm, LayerNorm
 from matgl.utils.cutoff import cosine_cutoff
-from matgl.utils.maths import decompose_tensor, new_radial_tensor, scatter_add, tensor_norm
+from matgl.utils.maths import decompose_tensor, new_radial_tensor, scatter_add, scatter_mean, tensor_norm
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -98,7 +98,7 @@ class MEGNetGraphConv(Module):
             Output tensor for nodes.
         """
         src, _ = graph.edges()
-        graph.ndata["ve"] = scatter_add(graph.edata["e"], src, dim=0, dim_size=graph.num_nodes())
+        graph.ndata["ve"] = scatter_mean(graph.edata["e"], src, dim=0, dim_size=graph.num_nodes())
         ve = graph.ndata.pop("ve")
         v = graph.ndata.pop("v")
         u = graph.ndata.pop("u")
