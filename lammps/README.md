@@ -8,14 +8,18 @@ timestep.
 This directory ships:
 
 - `src/ML-MATGL/pair_matgl.{cpp,h}` — the CPU/serial pair style.
-- `cmake/ML-MATGL.cmake` — drop-in CMake snippet.
+- `src/KOKKOS/pair_matgl_kokkos.{cpp,h}` — the Kokkos GPU/host variant
+  (`pair_style matgl/kk`).
+- `cmake/ML-MATGL.cmake` and `cmake/ML-MATGL-KOKKOS.cmake` — drop-in
+  CMake snippets.
 - `tests/in.matgl_si` — sample input deck for a single-point parity check.
 
 The Python side (one repo up) ships `mgl create-lammps-model`, which
-produces the `.pt` artifact this pair style consumes.
+produces the `.pt` artifact these pair styles consume.
 
-> **Status — Phase 2 of the MatGL LAMMPS-Kokkos plugin.** Single-rank /
-> multi-rank CPU only. The Kokkos / GPU variant lands in Phase 3.
+> **Status — Phases 2 + 3 of the MatGL LAMMPS-Kokkos plugin.** CPU CI
+> exists (`.github/workflows/lammps-build.yml`); GPU runs require a
+> CUDA-capable runner (not in CI yet).
 
 ## Building
 
@@ -52,6 +56,41 @@ cmake -B build -S <lammps>/cmake \
     -D BUILD_MPI=ON
 cmake --build build -j 8
 ```
+
+### 2b. Build the Kokkos GPU variant
+
+To get the `matgl/kk` pair style, also enable Kokkos and append the
+matching snippet to LAMMPS' CMake. CUDA example for an Ampere card
+(A100/A30):
+
+```bash
+echo 'include(/path/to/matgl/lammps/cmake/ML-MATGL-KOKKOS.cmake)' \
+    >> <lammps>/cmake/CMakeLists.txt
+
+cmake -B build -S <lammps>/cmake \
+    -D PKG_ML-MATGL=ON \
+    -D PKG_KOKKOS=ON \
+    -D Kokkos_ENABLE_CUDA=ON \
+    -D Kokkos_ARCH_AMPERE80=ON \
+    -D CMAKE_PREFIX_PATH=/path/to/libtorch \
+    -D CMAKE_CXX_COMPILER=<lammps>/lib/kokkos/bin/nvcc_wrapper \
+    -D CMAKE_BUILD_TYPE=Release
+cmake --build build -j 8
+```
+
+Run with:
+
+```bash
+mpirun -n 1 build/lmp -k on g 1 -sf kk -in in.matgl_si
+```
+
+`-sf kk` makes LAMMPS prefer Kokkos pair styles, so `pair_style matgl`
+in your input deck dispatches to `matgl/kk` automatically. If you'd
+rather force it explicitly, write `pair_style matgl/kk` instead.
+
+**Single-GPU only.** Multi-rank Kokkos with libtorch is unreliable
+(MACE issues #1294 and #322); the package emits a CMake message making
+this explicit.
 
 Tested with:
 
@@ -107,6 +146,20 @@ Currently a no-op.
   capture the path. Re-issue `pair_style` / `pair_coeff` after a restart.
 - **TensorNet only.** M3GNet, CHGNet, MEGNet, SO3Net, QET are DGL-only
   in the matgl repo and would need PyG ports first.
+
+## Continuous integration
+
+`.github/workflows/lammps-build.yml` builds the **CPU** pair style on
+every push that touches the `lammps/` tree, the Python wrapper, or the
+workflow itself. The job runs inside the `lammps/lammps-build:ubuntu_latest`
+public Docker image, downloads a CXX11-ABI libtorch, clones LAMMPS at a
+pinned tag, builds with `PKG_ML-MATGL=ON`, exports a tiny in-tree model
+through `LAMMPSMatGLModel`, runs the `in.matgl_si` deck, and diffs the
+LAMMPS energy against the Python reference.
+
+The Kokkos variant is **not** exercised in CI today — GitHub-hosted
+runners have no GPU. Hardware-accelerated CI is on the Phase-3 follow-up
+list and likely lives on a self-hosted CUDA runner.
 
 ## Verifying a build
 

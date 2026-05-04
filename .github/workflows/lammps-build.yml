@@ -1,0 +1,190 @@
+name: LAMMPS pair_matgl build
+
+# Builds LAMMPS with PKG_ML-MATGL inside the official ``lammps/lammps-build``
+# Docker image (which provides cmake, gcc-12, OpenMPI and a LAMMPS source
+# checkout), drops a libtorch tarball next to it, and runs a single-point
+# parity check against the Python ASE calculator.
+#
+# Kokkos / GPU variant is *not* exercised here — GitHub-hosted runners have
+# no GPU. Phase-3 hardware testing is delegated to a self-hosted CUDA
+# runner (TODO).
+
+on:
+  push:
+    branches: ["*"]
+    paths:
+      - "lammps/**"
+      - "src/matgl/ext/_lammps.py"
+      - "src/matgl/ext/lammps.py"
+      - ".github/workflows/lammps-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lammps/**"
+      - "src/matgl/ext/_lammps.py"
+      - "src/matgl/ext/lammps.py"
+      - ".github/workflows/lammps-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build_pair_matgl_cpu:
+    name: pair_matgl (CPU, LAMMPS develop)
+    runs-on: ubuntu-latest
+
+    # The lammps/lammps-build image ships gcc-12, cmake, MPI, FFTW, etc.
+    # We only need to add libtorch + Python on top.
+    container:
+      image: lammps/lammps-build:ubuntu_latest
+
+    env:
+      LIBTORCH_VERSION: "2.5.1"
+      LAMMPS_REF: "stable_29Aug2024_update3"
+
+    steps:
+      - name: Checkout matgl
+        uses: actions/checkout@v4
+        with:
+          path: matgl
+
+      - name: Cache libtorch
+        id: cache-libtorch
+        uses: actions/cache@v4
+        with:
+          path: libtorch
+          key: libtorch-${{ env.LIBTORCH_VERSION }}-cpu-cxx11abi
+
+      - name: Download libtorch
+        if: steps.cache-libtorch.outputs.cache-hit != 'true'
+        run: |
+          curl -L -o libtorch.zip \
+            "https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+          unzip -q libtorch.zip
+          rm libtorch.zip
+
+      - name: Install Python deps (uv) for parity reference
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          cd matgl
+          uv venv --python 3.12
+          uv pip install -e .
+          uv pip install pytest
+
+      - name: Export tiny LAMMPS-loadable model
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          cd matgl
+          # Build a deterministic tiny TensorNet wrapped + scripted, saved
+          # to ../lammps_artifacts/model.pt for the C++ side to load.
+          mkdir -p ../lammps_artifacts
+          uv run python - <<'PY'
+          import torch
+          from matgl.apps._pes_pyg import Potential
+          from matgl.ext._lammps import LAMMPSMatGLModel
+          from matgl.models._tensornet_pyg import TensorNet
+          torch.manual_seed(0)
+          m = TensorNet(
+              element_types=("Mo", "S"),
+              is_intensive=False,
+              units=16, nblocks=1, num_rbf=8,
+              cutoff=4.0, use_warp=False, rbf_type="Gaussian",
+          )
+          p = Potential(model=m, calc_forces=True, calc_stresses=True); p.eval()
+          w = LAMMPSMatGLModel(potential=p, dtype=torch.float32); w.eval()
+          torch.jit.script(w).save("../lammps_artifacts/model.pt")
+          print("wrote ../lammps_artifacts/model.pt")
+          PY
+          # Save the Python-side reference (energy/forces) on the same Mo-S cell.
+          uv run python - <<'PY'
+          import json, torch, numpy as np
+          from pymatgen.core import Lattice, Structure
+          from pymatgen.optimization.neighbors import find_points_in_spheres
+          from matgl.apps._pes_pyg import Potential
+          from matgl.ext._lammps import LAMMPSMatGLModel
+          from matgl.models._tensornet_pyg import TensorNet
+          torch.manual_seed(0)
+          m = TensorNet(element_types=("Mo","S"), is_intensive=False, units=16, nblocks=1,
+                        num_rbf=8, cutoff=4.0, use_warp=False, rbf_type="Gaussian")
+          p = Potential(model=m, calc_forces=True, calc_stresses=True); p.eval()
+          w = LAMMPSMatGLModel(potential=p, dtype=torch.float32); w.eval()
+          struct = Structure(Lattice.cubic(4.5),
+              ["Mo","S","Mo","S"],
+              [[0,0,0],[0.5,0.5,0.5],[0.5,0,0.25],[0,0.5,0.75]])
+          src,dst,images,dist = find_points_in_spheres(
+              struct.cart_coords, struct.cart_coords, r=4.0,
+              pbc=np.array([1,1,1],dtype=np.int64),
+              lattice=np.array(struct.lattice.matrix), tol=1e-8)
+          keep = (src!=dst) | (dist>1e-8)
+          src,dst,images = src[keep], dst[keep], images[keep]
+          pos = torch.tensor(struct.cart_coords, dtype=torch.float32)
+          eidx = torch.tensor(np.stack([src,dst]), dtype=torch.long)
+          ushifts = torch.tensor(images, dtype=torch.long)
+          cell = torch.tensor(np.array(struct.lattice.matrix), dtype=torch.float32)
+          z = torch.tensor([s.specie.Z for s in struct], dtype=torch.long)
+          local = torch.ones(len(struct), dtype=torch.bool)
+          out = w(pos, eidx, ushifts, cell, z, local, True)
+          ref = {
+              "energy": float(out["total_energy_local"].item()),
+              "forces": out["forces"].detach().tolist(),
+          }
+          with open("../lammps_artifacts/reference.json","w") as fh: json.dump(ref, fh, indent=2)
+          print(json.dumps(ref, indent=2))
+          PY
+
+      - name: Clone LAMMPS
+        run: |
+          git clone --depth 1 --branch ${LAMMPS_REF} \
+              https://github.com/lammps/lammps.git lammps_src
+
+      - name: Drop ML-MATGL package into LAMMPS source tree
+        run: |
+          ln -s "${GITHUB_WORKSPACE}/matgl/lammps/src/ML-MATGL" lammps_src/src/ML-MATGL
+          # Append our cmake snippet to LAMMPS' top-level cmake.
+          echo "include(${GITHUB_WORKSPACE}/matgl/lammps/cmake/ML-MATGL.cmake)" \
+              >> lammps_src/cmake/CMakeLists.txt
+
+      - name: Configure LAMMPS
+        run: |
+          cmake -B lammps_src/build -S lammps_src/cmake \
+            -D PKG_ML-MATGL=ON \
+            -D CMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/libtorch" \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D BUILD_MPI=OFF \
+            -D BUILD_OMP=ON \
+            -D CMAKE_CXX_STANDARD=17
+
+      - name: Build LAMMPS
+        run: |
+          cmake --build lammps_src/build -j 2
+
+      - name: Run pair_matgl single-point deck
+        run: |
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/libtorch/lib:${LD_LIBRARY_PATH:-}"
+          cp lammps_artifacts/model.pt matgl/lammps/tests/model.pt
+          cd matgl/lammps/tests
+          "${GITHUB_WORKSPACE}/lammps_src/build/lmp" -in in.matgl_si | tee log.lammps
+
+      - name: Diff LAMMPS energy against Python reference
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          cd matgl
+          uv run python - <<'PY'
+          import json, re, sys
+          ref = json.load(open("../lammps_artifacts/reference.json"))
+          log = open("lammps/tests/log.lammps").read()
+          # The "Step PotEng ..." block in thermo output. With `run 0` LAMMPS
+          # prints two rows; pull the second (post-step) value of column "PotEng".
+          # Default thermo_style for pair_matgl test deck: step pe fx fy fz pxx pyy pzz
+          pe = None
+          for line in log.splitlines():
+              cols = line.split()
+              if len(cols) >= 2 and cols[0].isdigit():
+                  pe = float(cols[1])
+          assert pe is not None, "Could not find PotEng row in log.lammps"
+          ref_e = ref["energy"]
+          diff = abs(pe - ref_e)
+          print(f"LAMMPS PotEng = {pe!r}, Python ref = {ref_e!r}, diff = {diff:.3e}")
+          if diff > 1e-3:
+              print("ENERGY MISMATCH!", file=sys.stderr)
+              sys.exit(1)
+          PY

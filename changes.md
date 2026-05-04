@@ -17,8 +17,13 @@ nav_order: 3
   additions, no runtime behaviour changed.
 - Added the C++ side of the LAMMPS plugin under `lammps/`:
   `pair_matgl` (CPU/serial pair style, manybody), a CMake snippet, a sample
-  input deck, and a Python reference helper. Phase 2 of the plugin; the
-  Kokkos GPU variant lands in Phase 3.
+  input deck, and a Python reference helper. Phase 2 of the plugin.
+- Added the Kokkos GPU/host variant `pair_matgl/kk` under
+  `lammps/src/KOKKOS/`, a matching `cmake/ML-MATGL-KOKKOS.cmake` snippet,
+  and a `lammps-build` GitHub Actions workflow that compiles the CPU pair
+  style inside the public `lammps/lammps-build` Docker image and parity-checks
+  the resulting LAMMPS run against the Python ASE calculator. Phase 3 of
+  the plugin; CUDA CI (real GPU runs) is deferred to a self-hosted runner.
 - Removed the legacy GitHub `pretrained_models/` download fallback now that Hugging Face
   is the canonical source for pre-trained matgl models. The `RemoteFile` class and the
   `PRETRAINED_MODELS_BASE_URL` config constant have been removed, and
