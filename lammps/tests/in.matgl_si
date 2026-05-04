@@ -38,8 +38,13 @@ mass            2 32.06          # S
 pair_style      matgl
 pair_coeff      * * model.pt Mo S
 
-thermo_style    custom step pe fx fy fz pxx pyy pzz
+# `fx`/`fy`/`fz` aren't valid thermo keywords — dump per-atom forces with
+# `dump` if you want them, the parity check only needs the scalar `pe`.
+thermo_style    custom step pe pxx pyy pzz pyz pxz pxy
 thermo          1
+
+dump            forces all custom 1 forces.dump id type x y z fx fy fz
+dump_modify     forces sort id
 
 # Single-point evaluation.
 run             0
