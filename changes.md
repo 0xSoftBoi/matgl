@@ -12,10 +12,13 @@ nav_order: 3
   in a TorchScript-friendly module that takes Cartesian positions, edge
   connectivity, integer image shifts, cell, atomic numbers, and a ghost mask
   and returns total local energy / per-atom energies / forces / virials.
-  Phase 1 of the matgl LAMMPS-Kokkos plugin (the C++ `pair_matgl[/kokkos]`
-  side will land in follow-up PRs). Several upstream PyG layers gained
-  explicit type annotations to make TorchScript export work — pure
+  Phase 1 of the matgl LAMMPS-Kokkos plugin. Several upstream PyG layers
+  gained explicit type annotations to make TorchScript export work — pure
   additions, no runtime behaviour changed.
+- Added the C++ side of the LAMMPS plugin under `lammps/`:
+  `pair_matgl` (CPU/serial pair style, manybody), a CMake snippet, a sample
+  input deck, and a Python reference helper. Phase 2 of the plugin; the
+  Kokkos GPU variant lands in Phase 3.
 - Removed the legacy GitHub `pretrained_models/` download fallback now that Hugging Face
   is the canonical source for pre-trained matgl models. The `RemoteFile` class and the
   `PRETRAINED_MODELS_BASE_URL` config constant have been removed, and
