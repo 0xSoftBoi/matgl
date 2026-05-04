@@ -231,10 +231,15 @@ jobs:
         run: |
           BUILD_DIR="${GITHUB_WORKSPACE}/lammps_build"
           rm -rf "${BUILD_DIR}"
+          # The CPU libtorch ships a broken Caffe2/MKL include dir reference
+          # in its CMake config; supply a harmless existing path so the
+          # generator step doesn't fail. The CPU build doesn't actually need
+          # MKL headers.
           cmake -B "${BUILD_DIR}" -S "${LAMMPS_SRC}/cmake" \
             -G Ninja \
             -D PKG_ML-MATGL=ON \
             -D CMAKE_PREFIX_PATH="${LIBTORCH}" \
+            -D MKL_INCLUDE_DIR=/usr/include \
             -D CMAKE_BUILD_TYPE=Release \
             -D BUILD_MPI=OFF \
             -D BUILD_OMP=ON \
