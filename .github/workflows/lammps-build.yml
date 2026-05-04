@@ -1,9 +1,13 @@
 name: LAMMPS pair_matgl build
 
-# Builds LAMMPS with PKG_ML-MATGL inside the official ``lammps/lammps-build``
-# Docker image (which provides cmake, gcc-12, OpenMPI and a LAMMPS source
-# checkout), drops a libtorch tarball next to it, and runs a single-point
-# parity check against the Python ASE calculator.
+# Builds LAMMPS from source on a vanilla ubuntu-latest runner with
+# PKG_ML-MATGL=ON, drops a CXX11-ABI libtorch tarball next to it, and runs
+# a single-point parity check against the Python ASE calculator.
+#
+# We don't use the public lammps/lammps Docker image — it's pinned to an
+# old release and rebuilds wouldn't be cheaper than a from-source compile
+# anyway. Instead we cache both the libtorch download and the LAMMPS source
+# clone so warm runs only pay for the package compile (~3 minutes).
 #
 # Kokkos / GPU variant is *not* exercised here — GitHub-hosted runners have
 # no GPU. Phase-3 hardware testing is delegated to a self-hosted CUDA
@@ -28,23 +32,39 @@ on:
 
 jobs:
   build_pair_matgl_cpu:
-    name: pair_matgl (CPU, LAMMPS develop)
+    name: pair_matgl (CPU, LAMMPS ${{ matrix.lammps_ref }})
     runs-on: ubuntu-latest
 
-    # The lammps/lammps-build image ships gcc-12, cmake, MPI, FFTW, etc.
-    # We only need to add libtorch + Python on top.
-    container:
-      image: lammps/lammps-build:ubuntu_latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One stable tag for reproducibility, plus develop-tip for early
+        # warning when LAMMPS' neighbor-list / Pair APIs drift.
+        include:
+          - lammps_ref: "stable_29Aug2024_update3"
+          - lammps_ref: "develop"
 
     env:
       LIBTORCH_VERSION: "2.5.1"
-      LAMMPS_REF: "stable_29Aug2024_update3"
+      LAMMPS_REF: ${{ matrix.lammps_ref }}
 
     steps:
       - name: Checkout matgl
         uses: actions/checkout@v4
         with:
           path: matgl
+
+      - name: Install system build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+              build-essential cmake ninja-build \
+              gcc-12 g++-12 \
+              libfftw3-dev libjpeg-dev libpng-dev \
+              python3 python3-venv \
+              git curl unzip ca-certificates
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
       - name: Cache libtorch
         id: cache-libtorch
@@ -61,6 +81,19 @@ jobs:
           unzip -q libtorch.zip
           rm libtorch.zip
 
+      - name: Cache LAMMPS source clone
+        id: cache-lammps-src
+        uses: actions/cache@v4
+        with:
+          path: lammps_src
+          key: lammps-src-${{ env.LAMMPS_REF }}
+
+      - name: Clone LAMMPS
+        if: steps.cache-lammps-src.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "${LAMMPS_REF}" \
+              https://github.com/lammps/lammps.git lammps_src
+
       - name: Install Python deps (uv) for parity reference
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -70,18 +103,21 @@ jobs:
           uv pip install -e .
           uv pip install pytest
 
-      - name: Export tiny LAMMPS-loadable model
+      - name: Export tiny LAMMPS-loadable model + Python reference
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           cd matgl
-          # Build a deterministic tiny TensorNet wrapped + scripted, saved
-          # to ../lammps_artifacts/model.pt for the C++ side to load.
           mkdir -p ../lammps_artifacts
           uv run python - <<'PY'
+          import json
+          import numpy as np
           import torch
+          from pymatgen.core import Lattice, Structure
+          from pymatgen.optimization.neighbors import find_points_in_spheres
           from matgl.apps._pes_pyg import Potential
           from matgl.ext._lammps import LAMMPSMatGLModel
           from matgl.models._tensornet_pyg import TensorNet
+
           torch.manual_seed(0)
           m = TensorNet(
               element_types=("Mo", "S"),
@@ -89,35 +125,27 @@ jobs:
               units=16, nblocks=1, num_rbf=8,
               cutoff=4.0, use_warp=False, rbf_type="Gaussian",
           )
-          p = Potential(model=m, calc_forces=True, calc_stresses=True); p.eval()
-          w = LAMMPSMatGLModel(potential=p, dtype=torch.float32); w.eval()
+          p = Potential(model=m, calc_forces=True, calc_stresses=True)
+          p.eval()
+          w = LAMMPSMatGLModel(potential=p, dtype=torch.float32)
+          w.eval()
           torch.jit.script(w).save("../lammps_artifacts/model.pt")
           print("wrote ../lammps_artifacts/model.pt")
-          PY
-          # Save the Python-side reference (energy/forces) on the same Mo-S cell.
-          uv run python - <<'PY'
-          import json, torch, numpy as np
-          from pymatgen.core import Lattice, Structure
-          from pymatgen.optimization.neighbors import find_points_in_spheres
-          from matgl.apps._pes_pyg import Potential
-          from matgl.ext._lammps import LAMMPSMatGLModel
-          from matgl.models._tensornet_pyg import TensorNet
-          torch.manual_seed(0)
-          m = TensorNet(element_types=("Mo","S"), is_intensive=False, units=16, nblocks=1,
-                        num_rbf=8, cutoff=4.0, use_warp=False, rbf_type="Gaussian")
-          p = Potential(model=m, calc_forces=True, calc_stresses=True); p.eval()
-          w = LAMMPSMatGLModel(potential=p, dtype=torch.float32); w.eval()
-          struct = Structure(Lattice.cubic(4.5),
-              ["Mo","S","Mo","S"],
-              [[0,0,0],[0.5,0.5,0.5],[0.5,0,0.25],[0,0.5,0.75]])
-          src,dst,images,dist = find_points_in_spheres(
+
+          struct = Structure(
+              Lattice.cubic(4.5),
+              ["Mo", "S", "Mo", "S"],
+              [[0, 0, 0], [0.5, 0.5, 0.5], [0.5, 0, 0.25], [0, 0.5, 0.75]],
+          )
+          src, dst, images, dist = find_points_in_spheres(
               struct.cart_coords, struct.cart_coords, r=4.0,
-              pbc=np.array([1,1,1],dtype=np.int64),
-              lattice=np.array(struct.lattice.matrix), tol=1e-8)
-          keep = (src!=dst) | (dist>1e-8)
-          src,dst,images = src[keep], dst[keep], images[keep]
+              pbc=np.array([1, 1, 1], dtype=np.int64),
+              lattice=np.array(struct.lattice.matrix), tol=1e-8,
+          )
+          keep = (src != dst) | (dist > 1e-8)
+          src, dst, images = src[keep], dst[keep], images[keep]
           pos = torch.tensor(struct.cart_coords, dtype=torch.float32)
-          eidx = torch.tensor(np.stack([src,dst]), dtype=torch.long)
+          eidx = torch.tensor(np.stack([src, dst]), dtype=torch.long)
           ushifts = torch.tensor(images, dtype=torch.long)
           cell = torch.tensor(np.array(struct.lattice.matrix), dtype=torch.float32)
           z = torch.tensor([s.specie.Z for s in struct], dtype=torch.long)
@@ -127,25 +155,28 @@ jobs:
               "energy": float(out["total_energy_local"].item()),
               "forces": out["forces"].detach().tolist(),
           }
-          with open("../lammps_artifacts/reference.json","w") as fh: json.dump(ref, fh, indent=2)
+          with open("../lammps_artifacts/reference.json", "w") as fh:
+              json.dump(ref, fh, indent=2)
           print(json.dumps(ref, indent=2))
           PY
 
-      - name: Clone LAMMPS
-        run: |
-          git clone --depth 1 --branch ${LAMMPS_REF} \
-              https://github.com/lammps/lammps.git lammps_src
-
       - name: Drop ML-MATGL package into LAMMPS source tree
         run: |
-          ln -s "${GITHUB_WORKSPACE}/matgl/lammps/src/ML-MATGL" lammps_src/src/ML-MATGL
+          # Use a copy not a symlink — LAMMPS' build expects a real directory
+          # under src/ for package detection.
+          rm -rf lammps_src/src/ML-MATGL
+          cp -r matgl/lammps/src/ML-MATGL lammps_src/src/ML-MATGL
           # Append our cmake snippet to LAMMPS' top-level cmake.
-          echo "include(${GITHUB_WORKSPACE}/matgl/lammps/cmake/ML-MATGL.cmake)" \
-              >> lammps_src/cmake/CMakeLists.txt
+          if ! grep -q ML-MATGL.cmake lammps_src/cmake/CMakeLists.txt; then
+              echo "include(${GITHUB_WORKSPACE}/matgl/lammps/cmake/ML-MATGL.cmake)" \
+                  >> lammps_src/cmake/CMakeLists.txt
+          fi
 
       - name: Configure LAMMPS
         run: |
+          rm -rf lammps_src/build
           cmake -B lammps_src/build -S lammps_src/cmake \
+            -G Ninja \
             -D PKG_ML-MATGL=ON \
             -D CMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/libtorch" \
             -D CMAKE_BUILD_TYPE=Release \
@@ -169,17 +200,21 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           cd matgl
           uv run python - <<'PY'
-          import json, re, sys
+          import json
+          import sys
+
           ref = json.load(open("../lammps_artifacts/reference.json"))
           log = open("lammps/tests/log.lammps").read()
-          # The "Step PotEng ..." block in thermo output. With `run 0` LAMMPS
-          # prints two rows; pull the second (post-step) value of column "PotEng".
-          # Default thermo_style for pair_matgl test deck: step pe fx fy fz pxx pyy pzz
+          # thermo_style for the test deck is "step pe fx fy fz pxx pyy pzz".
+          # With ``run 0`` LAMMPS prints one numeric row; pull its second column.
           pe = None
           for line in log.splitlines():
               cols = line.split()
-              if len(cols) >= 2 and cols[0].isdigit():
-                  pe = float(cols[1])
+              if len(cols) >= 2 and cols[0].lstrip("-").isdigit():
+                  try:
+                      pe = float(cols[1])
+                  except ValueError:
+                      continue
           assert pe is not None, "Could not find PotEng row in log.lammps"
           ref_e = ref["energy"]
           diff = abs(pe - ref_e)
@@ -188,3 +223,15 @@ jobs:
               print("ENERGY MISMATCH!", file=sys.stderr)
               sys.exit(1)
           PY
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lammps-debug-${{ matrix.lammps_ref }}
+          path: |
+            matgl/lammps/tests/log.lammps
+            lammps_artifacts/
+            lammps_src/build/CMakeFiles/CMakeOutput.log
+            lammps_src/build/CMakeFiles/CMakeError.log
+          if-no-files-found: ignore
