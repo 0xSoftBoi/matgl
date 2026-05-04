@@ -1,13 +1,13 @@
 name: LAMMPS pair_matgl build
 
-# Builds LAMMPS from source on a vanilla ubuntu-latest runner with
-# PKG_ML-MATGL=ON, drops a CXX11-ABI libtorch tarball next to it, and runs
-# a single-point parity check against the Python ASE calculator.
+# Builds LAMMPS with PKG_ML-MATGL inside the materialyzeai/lammps image
+# and runs a single-point parity check against the Python ASE calculator.
 #
-# We don't use the public lammps/lammps Docker image — it's pinned to an
-# old release and rebuilds wouldn't be cheaper than a from-source compile
-# anyway. Instead we cache both the libtorch download and the LAMMPS source
-# clone so warm runs only pay for the package compile (~3 minutes).
+# The image is expected to ship:
+#   * a LAMMPS source checkout (path discovered at run time),
+#   * libtorch (CXX11 ABI),
+#   * gcc/g++/cmake/python3.
+# If any of those are missing the workflow falls back to downloading them.
 #
 # Kokkos / GPU variant is *not* exercised here — GitHub-hosted runners have
 # no GPU. Phase-3 hardware testing is delegated to a self-hosted CUDA
@@ -32,21 +32,14 @@ on:
 
 jobs:
   build_pair_matgl_cpu:
-    name: pair_matgl (CPU, LAMMPS ${{ matrix.lammps_ref }})
+    name: pair_matgl (CPU)
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        # One stable tag for reproducibility, plus develop-tip for early
-        # warning when LAMMPS' neighbor-list / Pair APIs drift.
-        include:
-          - lammps_ref: "stable_29Aug2024_update3"
-          - lammps_ref: "develop"
+    container:
+      image: materialyzeai/lammps:latest
 
     env:
       LIBTORCH_VERSION: "2.5.1"
-      LAMMPS_REF: ${{ matrix.lammps_ref }}
 
     steps:
       - name: Checkout matgl
@@ -54,47 +47,74 @@ jobs:
         with:
           path: matgl
 
-      - name: Install system build deps
+      - name: Probe image for LAMMPS source + libtorch
+        id: probe
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-              build-essential cmake ninja-build \
-              gcc-12 g++-12 \
-              libfftw3-dev libjpeg-dev libpng-dev \
-              python3 python3-venv \
-              git curl unzip ca-certificates
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+          set -e
+          # LAMMPS source — check the usual suspects.
+          for cand in /opt/lammps /usr/local/src/lammps /lammps "$HOME/lammps"; do
+              if [ -f "$cand/cmake/CMakeLists.txt" ]; then
+                  echo "lammps_src=$cand" >> "$GITHUB_OUTPUT"
+                  echo "Found LAMMPS source at: $cand"
+                  break
+              fi
+          done
+          # libtorch — check the usual suspects.
+          for cand in /opt/libtorch /usr/local/libtorch /libtorch "$HOME/libtorch"; do
+              if [ -f "$cand/share/cmake/Torch/TorchConfig.cmake" ]; then
+                  echo "libtorch=$cand" >> "$GITHUB_OUTPUT"
+                  echo "Found libtorch at: $cand"
+                  break
+              fi
+          done
 
-      - name: Cache libtorch
+      - name: Cache libtorch (fallback)
+        if: steps.probe.outputs.libtorch == ''
         id: cache-libtorch
         uses: actions/cache@v4
         with:
           path: libtorch
           key: libtorch-${{ env.LIBTORCH_VERSION }}-cpu-cxx11abi
 
-      - name: Download libtorch
-        if: steps.cache-libtorch.outputs.cache-hit != 'true'
+      - name: Download libtorch (fallback)
+        if: steps.probe.outputs.libtorch == '' && steps.cache-libtorch.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           curl -L -o libtorch.zip \
             "https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
           unzip -q libtorch.zip
           rm libtorch.zip
 
-      - name: Cache LAMMPS source clone
-        id: cache-lammps-src
-        uses: actions/cache@v4
-        with:
-          path: lammps_src
-          key: lammps-src-${{ env.LAMMPS_REF }}
-
-      - name: Clone LAMMPS
-        if: steps.cache-lammps-src.outputs.cache-hit != 'true'
+      - name: Resolve libtorch path
+        id: libtorch
+        shell: bash
         run: |
-          git clone --depth 1 --branch "${LAMMPS_REF}" \
+          if [ -n "${{ steps.probe.outputs.libtorch }}" ]; then
+              echo "path=${{ steps.probe.outputs.libtorch }}" >> "$GITHUB_OUTPUT"
+          else
+              echo "path=${GITHUB_WORKSPACE}/libtorch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Clone LAMMPS (fallback)
+        if: steps.probe.outputs.lammps_src == ''
+        shell: bash
+        run: |
+          git clone --depth 1 --branch develop \
               https://github.com/lammps/lammps.git lammps_src
 
+      - name: Resolve LAMMPS source path
+        id: lammps
+        shell: bash
+        run: |
+          if [ -n "${{ steps.probe.outputs.lammps_src }}" ]; then
+              echo "path=${{ steps.probe.outputs.lammps_src }}" >> "$GITHUB_OUTPUT"
+          else
+              echo "path=${GITHUB_WORKSPACE}/lammps_src" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Python deps (uv) for parity reference
+        shell: bash
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           export PATH="$HOME/.local/bin:$PATH"
@@ -104,6 +124,7 @@ jobs:
           uv pip install pytest
 
       - name: Export tiny LAMMPS-loadable model + Python reference
+        shell: bash
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           cd matgl
@@ -130,7 +151,6 @@ jobs:
           w = LAMMPSMatGLModel(potential=p, dtype=torch.float32)
           w.eval()
           torch.jit.script(w).save("../lammps_artifacts/model.pt")
-          print("wrote ../lammps_artifacts/model.pt")
 
           struct = Structure(
               Lattice.cubic(4.5),
@@ -161,41 +181,51 @@ jobs:
           PY
 
       - name: Drop ML-MATGL package into LAMMPS source tree
+        shell: bash
+        env:
+          LAMMPS_SRC: ${{ steps.lammps.outputs.path }}
         run: |
-          # Use a copy not a symlink — LAMMPS' build expects a real directory
-          # under src/ for package detection.
-          rm -rf lammps_src/src/ML-MATGL
-          cp -r matgl/lammps/src/ML-MATGL lammps_src/src/ML-MATGL
-          # Append our cmake snippet to LAMMPS' top-level cmake.
-          if ! grep -q ML-MATGL.cmake lammps_src/cmake/CMakeLists.txt; then
+          rm -rf "${LAMMPS_SRC}/src/ML-MATGL"
+          cp -r matgl/lammps/src/ML-MATGL "${LAMMPS_SRC}/src/ML-MATGL"
+          if ! grep -q ML-MATGL.cmake "${LAMMPS_SRC}/cmake/CMakeLists.txt"; then
               echo "include(${GITHUB_WORKSPACE}/matgl/lammps/cmake/ML-MATGL.cmake)" \
-                  >> lammps_src/cmake/CMakeLists.txt
+                  >> "${LAMMPS_SRC}/cmake/CMakeLists.txt"
           fi
 
       - name: Configure LAMMPS
+        shell: bash
+        env:
+          LAMMPS_SRC: ${{ steps.lammps.outputs.path }}
+          LIBTORCH: ${{ steps.libtorch.outputs.path }}
         run: |
-          rm -rf lammps_src/build
-          cmake -B lammps_src/build -S lammps_src/cmake \
+          BUILD_DIR="${GITHUB_WORKSPACE}/lammps_build"
+          rm -rf "${BUILD_DIR}"
+          cmake -B "${BUILD_DIR}" -S "${LAMMPS_SRC}/cmake" \
             -G Ninja \
             -D PKG_ML-MATGL=ON \
-            -D CMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/libtorch" \
+            -D CMAKE_PREFIX_PATH="${LIBTORCH}" \
             -D CMAKE_BUILD_TYPE=Release \
             -D BUILD_MPI=OFF \
             -D BUILD_OMP=ON \
             -D CMAKE_CXX_STANDARD=17
 
       - name: Build LAMMPS
+        shell: bash
         run: |
-          cmake --build lammps_src/build -j 2
+          cmake --build "${GITHUB_WORKSPACE}/lammps_build" -j 2
 
       - name: Run pair_matgl single-point deck
+        shell: bash
+        env:
+          LIBTORCH: ${{ steps.libtorch.outputs.path }}
         run: |
-          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/libtorch/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="${LIBTORCH}/lib:${LD_LIBRARY_PATH:-}"
           cp lammps_artifacts/model.pt matgl/lammps/tests/model.pt
           cd matgl/lammps/tests
-          "${GITHUB_WORKSPACE}/lammps_src/build/lmp" -in in.matgl_si | tee log.lammps
+          "${GITHUB_WORKSPACE}/lammps_build/lmp" -in in.matgl_si | tee log.lammps
 
       - name: Diff LAMMPS energy against Python reference
+        shell: bash
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           cd matgl
@@ -228,10 +258,10 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: lammps-debug-${{ matrix.lammps_ref }}
+          name: lammps-debug
           path: |
             matgl/lammps/tests/log.lammps
             lammps_artifacts/
-            lammps_src/build/CMakeFiles/CMakeOutput.log
-            lammps_src/build/CMakeFiles/CMakeError.log
+            lammps_build/CMakeFiles/CMakeOutput.log
+            lammps_build/CMakeFiles/CMakeError.log
           if-no-files-found: ignore
