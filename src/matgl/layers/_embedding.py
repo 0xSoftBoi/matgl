@@ -73,7 +73,12 @@ class EmbeddingBlock(nn.Module):
             dim_edges = [degree_rbf, dim_edge_embedding]
             self.layer_edge_embedding = MLP(dim_edges, activation=activation, activate_last=True)
 
-    def forward(self, node_attr, edge_attr, state_attr):
+    def forward(
+        self,
+        node_attr: torch.Tensor,
+        edge_attr: torch.Tensor,
+        state_attr: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Output embedded features.
 
         Args:
@@ -94,14 +99,14 @@ class EmbeddingBlock(nn.Module):
             edge_feat = self.layer_edge_embedding(edge_attr.to(matgl.float_th))
         else:
             edge_feat = edge_attr
+        state_feat: torch.Tensor | None = None
         if self.include_state is True:
-            if self.ntypes_state and self.dim_state_embedding is not None:
+            assert state_attr is not None, "state_attr must be provided when include_state=True"
+            if self.ntypes_state is not None and self.dim_state_embedding is not None:
                 state_feat = self.layer_state_embedding(state_attr)
             elif self.dim_state_feats is not None:
                 state_attr = torch.unsqueeze(state_attr, 0)
                 state_feat = self.layer_state_embedding(state_attr.to(matgl.float_th))
             else:
                 state_feat = state_attr
-        else:
-            state_feat = None
         return node_feat, edge_feat, state_feat

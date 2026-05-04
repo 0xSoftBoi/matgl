@@ -182,11 +182,12 @@ module = ["matgl.kernels.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-# ``register_buffer`` returns ``Tensor | Module`` in mypy's view; indexing those
-# triggers spurious errors. Annotating the buffers at class scope to fix it
-# breaks TorchScript's annotation resolver, so silence those specific errors.
+# ``register_buffer`` returns ``Tensor | Module`` in mypy's view; indexing,
+# iterating, or attribute-accessing those triggers spurious errors.
+# Annotating the buffers at class scope to fix it breaks TorchScript's
+# annotation resolver, so silence the affected codes.
 module = ["matgl.ext._lammps"]
-disable_error_code = ["index"]
+disable_error_code = ["index", "arg-type", "operator", "union-attr"]
 
 [tool.coverage.run]
 relative_files = true

@@ -23,6 +23,7 @@ from pymatgen.optimization.neighbors import find_points_in_spheres
 from matgl.apps._pes_pyg import Potential
 from matgl.ext._lammps import LAMMPSMatGLModel
 from matgl.ext._pymatgen_pyg import Structure2Graph
+from matgl.models._m3gnet_pyg import M3GNet
 from matgl.models._tensornet_pyg import TensorNet
 
 
@@ -59,9 +60,7 @@ def _build_lammps_inputs(structure: Structure, element_types: tuple[str, ...], c
     return positions, edge_index, unit_shifts, cell, z_per_atom, local_or_ghost
 
 
-@pytest.fixture
-def tiny_potential():
-    """Small deterministic TensorNet wrapped in an extensive Potential."""
+def _build_tensornet_potential() -> tuple[Potential, tuple[str, ...]]:
     torch.manual_seed(0)
     element_types = ("Mo", "S")
     model = TensorNet(
@@ -74,7 +73,6 @@ def tiny_potential():
         use_warp=False,
         rbf_type="Gaussian",
     )
-    # Non-trivial element_refs so we exercise that code path.
     refs = torch.tensor([-1.5, -2.25], dtype=matgl.float_th)
     pot = Potential(
         model=model,
@@ -86,6 +84,44 @@ def tiny_potential():
     )
     pot.eval()
     return pot, element_types
+
+
+def _build_m3gnet_potential() -> tuple[Potential, tuple[str, ...]]:
+    torch.manual_seed(0)
+    element_types = ("Mo", "S")
+    model = M3GNet(
+        element_types=element_types,
+        is_intensive=False,
+        cutoff=4.0,
+        threebody_cutoff=3.0,
+        dim_node_embedding=16,
+        dim_edge_embedding=16,
+        n_blocks=1,
+        max_n=3,
+        max_l=3,
+        units=16,
+        rbf_type="SphericalBessel",
+        use_smooth=True,
+    )
+    refs = torch.tensor([-1.5, -2.25], dtype=matgl.float_th)
+    pot = Potential(
+        model=model,
+        data_mean=0.0,
+        data_std=1.0,
+        element_refs=refs,
+        calc_forces=True,
+        calc_stresses=True,
+    )
+    pot.eval()
+    return pot, element_types
+
+
+@pytest.fixture(params=["tensornet", "m3gnet"])
+def tiny_potential(request):
+    """Tiny deterministic Potential, parametrized over supported architectures."""
+    if request.param == "tensornet":
+        return _build_tensornet_potential()
+    return _build_m3gnet_potential()
 
 
 @pytest.fixture

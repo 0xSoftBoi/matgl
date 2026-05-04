@@ -24,6 +24,18 @@ nav_order: 3
   style inside the public `lammps/lammps-build` Docker image and parity-checks
   the resulting LAMMPS run against the Python ASE calculator. Phase 3 of
   the plugin; CUDA CI (real GPU runs) is deferred to a self-hosted runner.
+- Extended `LAMMPSMatGLModel` to support **M3GNet (PyG)** in addition to
+  TensorNet. The wrapper restructures into a kernel-composition pattern
+  (`_TensorNetKernel` / `_M3GNetKernel`); the M3GNet kernel ships a
+  TorchScript-friendly tensor-only port of the smooth spherical Bessel +
+  Y_l^0 basis (avoiding the sympy-lambdified Python lists in
+  `SphericalBesselFunction` / `SphericalHarmonicsFunction`) and a tensor-only
+  3-body line-graph builder (`create_line_graph_torch` /
+  `_compute_3body_indices_torch`). Currently requires
+  `rbf_type='SphericalBessel'`, `use_smooth=True`, `use_phi=False` — the
+  standard M3GNet PES configuration. Tests parametrize over both
+  architectures; QET still deferred (charge head + LAMMPS `atom_style charge`
+  wiring).
 - Removed the legacy GitHub `pretrained_models/` download fallback now that Hugging Face
   is the canonical source for pre-trained matgl models. The `RemoteFile` class and the
   `PRETRAINED_MODELS_BASE_URL` config constant have been removed, and

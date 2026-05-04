@@ -379,7 +379,7 @@ class MEGNetBlock(Module):
             edge_index, edge_feat, node_feat, state_feat, node_batch, edge_batch, num_nodes, num_graphs
         )
 
-        if self.dropout:
+        if self.dropout is not None:
             edge_feat = self.dropout(edge_feat)
             node_feat = self.dropout(node_feat)
             state_feat = self.dropout(state_feat)
@@ -499,7 +499,12 @@ class M3GNetGraphConv(Module):
         """Compute the state update (Eq. 6) using per-graph mean of node features."""
         uv = _per_graph_mean(node_feat, node_batch, num_graphs)
         inputs = torch.hstack([state_feat, uv])
-        return self.state_update_func(inputs)  # type: ignore[misc]
+        # Narrow ``state_update_func`` from Optional[Module] to Module for
+        # TorchScript — the caller already gates on ``include_state`` so the
+        # assert is informational only.
+        func = self.state_update_func
+        assert func is not None
+        return func(inputs)
 
     def forward(
         self,
@@ -592,7 +597,7 @@ class M3GNetBlock(Module):
         edge_feat, node_feat, state_feat = self.conv(
             edge_index, edge_feat, node_feat, state_feat, rbf, node_batch, edge_batch, num_nodes, num_graphs
         )
-        if self.dropout:
+        if self.dropout is not None:
             edge_feat = self.dropout(edge_feat)
             node_feat = self.dropout(node_feat)
             if state_feat is not None:
