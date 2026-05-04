@@ -142,9 +142,16 @@ class TensorNetInteraction(nn.Module):
 
         return X
 
-    def message(self, edge_index, x_I: torch.Tensor, x_A: torch.Tensor, x_S: torch.Tensor, edge_attr: torch.Tensor):
+    def message(
+        self,
+        edge_index: torch.Tensor,
+        x_I: torch.Tensor,
+        x_A: torch.Tensor,
+        x_S: torch.Tensor,
+        edge_attr: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute messages for each edge."""
-        _, dst = edge_index
+        dst = edge_index[1]
         x_I_j = x_I[dst]
         x_A_j = x_A[dst]
         x_S_j = x_S[dst]
@@ -153,7 +160,12 @@ class TensorNetInteraction(nn.Module):
         )
         return scalars, skew_metrices, traceless_tensors
 
-    def aggregate(self, inputs, index, dim_size):
+    def aggregate(
+        self,
+        inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        index: torch.Tensor,
+        dim_size: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Aggregate messages for node updates."""
         scalars, skew_matrices, traceless_tensors = inputs
         scalars_agg = scatter_add(scalars, index, dim_size=dim_size)

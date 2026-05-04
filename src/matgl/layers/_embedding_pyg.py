@@ -76,7 +76,16 @@ class TensorEmbedding(nn.Module):
             linear.reset_parameters()
         self.init_norm.reset_parameters()
 
-    def message(self, x_i, x_j, edge_attr, edge_weight, Iij, Aij, Sij):
+    def message(
+        self,
+        x_i: torch.Tensor,
+        x_j: torch.Tensor,
+        edge_attr: torch.Tensor,
+        edge_weight: torch.Tensor,
+        Iij: torch.Tensor,
+        Aij: torch.Tensor,
+        Sij: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Message function for edge updates."""
         vi = x_i  # Source node features
         vj = x_j  # Destination node features
@@ -86,13 +95,19 @@ class TensorEmbedding(nn.Module):
         scalars = Zij[..., None, None] * Iij
         skew_matrices = Zij[..., None, None] * Aij
         traceless_tensors = Zij[..., None, None] * Sij
-        return {"I": scalars, "A": skew_matrices, "S": traceless_tensors}
+        return scalars, skew_matrices, traceless_tensors
 
-    def aggregate(self, msg, index, dim_size=None):
+    def aggregate(
+        self,
+        msg: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        index: torch.Tensor,
+        dim_size: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Aggregate messages for node updates."""
-        scalars = scatter_add(msg["I"], index, dim_size=dim_size)
-        skew_matrices = scatter_add(msg["A"], index, dim_size=dim_size)
-        traceless_tensors = scatter_add(msg["S"], index, dim_size=dim_size)
+        scalars_msg, skew_msg, traceless_msg = msg
+        scalars = scatter_add(scalars_msg, index, dim_size=dim_size)
+        skew_matrices = scatter_add(skew_msg, index, dim_size=dim_size)
+        traceless_tensors = scatter_add(traceless_msg, index, dim_size=dim_size)
         return scalars, skew_matrices, traceless_tensors
 
     def forward(
@@ -102,8 +117,8 @@ class TensorEmbedding(nn.Module):
         edge_attr: torch.Tensor,
         edge_weight: torch.Tensor,
         edge_vec: torch.Tensor,
-        state_attr=None,
-    ):
+        state_attr: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Compute embedded node tensors and (optional) state features.
 
         Args:

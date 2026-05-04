@@ -181,6 +181,13 @@ ignore_missing_imports = true
 module = ["matgl.kernels.*"]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+# ``register_buffer`` returns ``Tensor | Module`` in mypy's view; indexing those
+# triggers spurious errors. Annotating the buffers at class scope to fix it
+# breaks TorchScript's annotation resolver, so silence those specific errors.
+module = ["matgl.ext._lammps"]
+disable_error_code = ["index"]
+
 [tool.coverage.run]
 relative_files = true
 omit = [

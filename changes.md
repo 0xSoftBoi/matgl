@@ -7,6 +7,15 @@ nav_order: 3
 # Change Log
 
 ## Unreleased
+- Added a LAMMPS-export wrapper, `matgl.ext.lammps.LAMMPSMatGLModel`, plus an
+  `mgl create-lammps-model` CLI subcommand. Wraps a TensorNet (PyG) `Potential`
+  in a TorchScript-friendly module that takes Cartesian positions, edge
+  connectivity, integer image shifts, cell, atomic numbers, and a ghost mask
+  and returns total local energy / per-atom energies / forces / virials.
+  Phase 1 of the matgl LAMMPS-Kokkos plugin (the C++ `pair_matgl[/kokkos]`
+  side will land in follow-up PRs). Several upstream PyG layers gained
+  explicit type annotations to make TorchScript export work — pure
+  additions, no runtime behaviour changed.
 - Removed the legacy GitHub `pretrained_models/` download fallback now that Hugging Face
   is the canonical source for pre-trained matgl models. The `RemoteFile` class and the
   `PRETRAINED_MODELS_BASE_URL` config constant have been removed, and
