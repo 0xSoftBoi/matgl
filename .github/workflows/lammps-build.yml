@@ -211,17 +211,34 @@ jobs:
           print(json.dumps(ref, indent=2))
           PY
 
-      - name: Drop ML-MATGL package into LAMMPS source tree
+      - name: Drop ML-MATGL sources into LAMMPS src/
+        # LAMMPS' style-header generator only scans top-level src/*.h plus
+        # *enabled* package subdirs, and ML-MATGL is not in LAMMPS' standard
+        # package list. Copy the .cpp/.h directly into src/ so the
+        # PairStyle(matgl, ...) macro gets picked up by style_pair.h, then
+        # also include our cmake snippet so libtorch ends up on the link line.
         shell: bash
         env:
           LAMMPS_SRC: ${{ steps.lammps.outputs.path }}
         run: |
-          rm -rf "${LAMMPS_SRC}/src/ML-MATGL"
-          cp -r matgl/lammps/src/ML-MATGL "${LAMMPS_SRC}/src/ML-MATGL"
+          cp matgl/lammps/src/ML-MATGL/pair_matgl.cpp "${LAMMPS_SRC}/src/"
+          cp matgl/lammps/src/ML-MATGL/pair_matgl.h   "${LAMMPS_SRC}/src/"
           if ! grep -q ML-MATGL.cmake "${LAMMPS_SRC}/cmake/CMakeLists.txt"; then
-              echo "include(${GITHUB_WORKSPACE}/matgl/lammps/cmake/ML-MATGL.cmake)" \
+              echo "include(${GITHUB_WORKSPACE}/matgl/lammps/cmake/ML-MATGL-CI.cmake)" \
                   >> "${LAMMPS_SRC}/cmake/CMakeLists.txt"
           fi
+          # Generate a minimal CI-only cmake fragment that just links Torch;
+          # the regular ML-MATGL.cmake assumes sources live in a subdir.
+          cat > matgl/lammps/cmake/ML-MATGL-CI.cmake <<'CM'
+          find_package(Torch REQUIRED)
+          target_compile_features(lammps PRIVATE cxx_std_17)
+          target_link_libraries(lammps PRIVATE ${TORCH_LIBRARIES})
+          if(DEFINED TORCH_CXX_FLAGS)
+              set_property(TARGET lammps APPEND_STRING
+                  PROPERTY COMPILE_FLAGS " ${TORCH_CXX_FLAGS}")
+          endif()
+          message(STATUS "ML-MATGL (CI): linked against TORCH_LIBRARIES=${TORCH_LIBRARIES}")
+          CM
 
       - name: Configure LAMMPS
         shell: bash
