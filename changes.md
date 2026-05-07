@@ -37,6 +37,17 @@ nav_order: 3
   architectures; QET still deferred (charge head + LAMMPS `atom_style charge`
   wiring).
 
+## 3.0.1
+- PyG charge-training parity for `QET`. `PotentialLightningModule` now accepts `charge_weight` and adds a per-atom
+  charge loss term (`Charge_MAE` / `Charge_RMSE`) on top of energy/force/stress; `Potential.forward` (PyG) takes
+  `total_charge` / `ext_pot` and returns equilibrated charges in the output tuple, mirroring the DGL pipeline.
+- `MGLDataset` (PyG) gains `include_ref_charge` to attach per-atom `q_ref` onto each `Data` object (consumed by
+  `LinearQeq`); `collate_fn_pes` (PyG) gains `include_charge` so per-atom charge labels propagate through batches.
+- Renamed PyG layer classes for cross-backend consistency: `AtomRefPyG` -> `AtomRef`, `NuclearRepulsionPyG` ->
+  `NuclearRepulsion` (matching the DGL counterparts).
+- CI: bumped GitHub Actions to Node 24 versions (`actions/checkout@v5`, `actions/setup-python@v6`,
+  `actions/upload-artifact@v5`, `actions/download-artifact@v5`, `astral-sh/setup-uv@v7`).
+
 ## 3.0.0
 - **PyG `M3GNet` and `QET`.** New PyG implementations of `M3GNet` and `QET` join the existing PyG `TensorNet` and
   `MEGNet`, so all four core architectures now run on the default PyG backend without DGL.

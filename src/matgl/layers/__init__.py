@@ -42,7 +42,7 @@ if BACKEND == "DGL":
     )
     from matgl.layers._zbl_dgl import NuclearRepulsion
 else:
-    from matgl.layers._atom_ref_pyg import AtomRefPyG  # type: ignore[assignment]
+    from matgl.layers._atom_ref_pyg import AtomRef  # type: ignore[assignment]
     from matgl.layers._embedding_pyg import TensorEmbedding  # type: ignore[assignment]
     from matgl.layers._graph_convolution_pyg import (  # type: ignore[assignment]
         M3GNetBlock,
@@ -58,4 +58,4 @@ else:
         WeightedAtomReadOut,
         WeightedReadOut,
     )
-    from matgl.layers._zbl_pyg import NuclearRepulsionPyG  # type: ignore[assignment]
+    from matgl.layers._zbl_pyg import NuclearRepulsion  # type: ignore[assignment]

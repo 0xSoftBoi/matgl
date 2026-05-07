@@ -89,42 +89,83 @@ class WeightedReadOut(nn.Module):
 
 
 class WeightedAtomReadOut(nn.Module):
-    """Weighted atom readout for graph properties in PyTorch Geometric."""
+    """Weighted atom readout for graph properties in PyTorch Geometric.
+
+    This follows the TensorFlow WeightedReadout implementation:
+
+        updated_field = mlp(field)
+        weights = weight_mlp(field)
+        factor = weights / sum(weights)
+        readout = sum(factor * updated_field)
+
+    where the normalization is performed independently for each graph.
+    """
 
     def __init__(self, in_feats: int, dims: Sequence[int], activation: nn.Module):
         """Initialize the WeightedAtomReadOut.
 
         Args:
             in_feats: Input features (nodes).
-            dims: NN architecture for Gated MLP.
+            dims: NN architecture for the MLP. The final entry is the output dimension.
             activation: Activation function for multi-layer perceptrons.
         """
         super().__init__()
+
         self.dims = [in_feats, *dims]
         self.activation = activation
-        self.mlp = MLP(dims=self.dims, activation=self.activation, activate_last=True)
-        self.weight = nn.Sequential(nn.Linear(in_feats, 1), nn.Sigmoid())
+
+        # Equivalent to the TensorFlow readout MLP:
+        # self.mlp = MLP(neurons=neurons, activations=[activation] * n_layer)
+        self.mlp = MLP(
+            dims=self.dims,
+            activation=self.activation,
+            activate_last=True,
+        )
+
+        # Equivalent to:
+        # weight_neurons = neurons[:-1] + [1]
+        # weight_activations = [activation] * (n_layer - 1) + ["sigmoid"]
+        self.weight = MLP(
+            dims=[*self.dims[:-1], 1],
+            activation=self.activation,
+            activate_last=False,
+        )
+        self.weight_activation = nn.Sigmoid()
 
     def forward(self, graph: Data) -> torch.Tensor:
         """Run the weighted atom readout.
 
         Args:
-            graph: PyG graph Data object.
+            graph: PyG graph Data object with ``graph.node_feat`` and ``graph.batch``.
 
         Returns:
-            atomic_properties: Tensor of shape (num_graphs, output_dim).
+            atomic_properties: Tensor of shape ``[num_graphs, output_dim]``.
         """
-        # Apply MLP to node features
-        h = self.mlp(graph.node_feat)  # Shape: (num_nodes, output_dim)
+        node_feat = graph.node_feat
 
-        # Compute weights for each node
-        w = self.weight(graph.node_feat)  # Shape: (num_nodes, 1)
+        if hasattr(graph, "batch") and graph.batch is not None:
+            batch = graph.batch
+        else:
+            batch = torch.zeros(
+                node_feat.shape[0],
+                dtype=torch.long,
+                device=node_feat.device,
+            )
 
-        # Weighted node features
-        weighted_h = h * w  # Element-wise multiplication, shape: (num_nodes, output_dim)
+        # updated_field = self.mlp(field)
+        updated_field = self.mlp(node_feat)  # [num_nodes, output_dim]
 
-        # Aggregate weighted node features per graph using global_add_pool
-        h_g_sum = global_add_pool(weighted_h, graph.batch)  # Shape: (num_graphs, output_dim)
+        # weights = self.weight(field)
+        weights = self.weight_activation(self.weight(node_feat))  # [num_nodes, 1]
+
+        # sum_j w_j for each graph
+        weight_sum = global_add_pool(weights, batch)  # [num_graphs, 1]
+
+        # factor_i = w_i / sum_j w_j
+        factor = weights / weight_sum[batch].clamp(min=1e-8)  # [num_nodes, 1]
+
+        # sum_i factor_i * updated_field_i
+        h_g_sum = global_add_pool(factor * updated_field, batch)
 
         return h_g_sum
 

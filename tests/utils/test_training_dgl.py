@@ -953,3 +953,77 @@ def test_xavier_init(distribution):
         print(w)
         assert not torch.allclose(w, model.output_proj.layers[0].get_parameter("weight"))
         assert torch.allclose(torch.tensor(0.0), model.output_proj.layers[0].get_parameter("bias"))
+
+
+def test_prediction_logger_train_and_val(LiFePO4, BaNiO3, tmp_path):
+    """PredictionLogger captures per-epoch train + val preds (DGL backend)."""
+    from matgl.utils.callbacks import PredictionLogger, add_sample_indices
+
+    torch.manual_seed(0)
+    structures = [LiFePO4, BaNiO3] * 4
+    energies = [-2.0, -3.0] * 4
+    forces = [np.zeros((len(s), 3)).tolist() for s in structures]
+    stresses = [np.zeros((3, 3)).tolist()] * len(structures)
+    element_types = get_element_list([LiFePO4, BaNiO3])
+    converter = Structure2Graph(element_types=element_types, cutoff=5.0)
+    dataset = MGLDataset(
+        threebody_cutoff=4.0,
+        structures=structures,
+        converter=converter,
+        include_line_graph=False,
+        labels={"energies": energies, "forces": forces, "stresses": stresses},
+        save_cache=False,
+    )
+    train_data, val_data, _ = split_dataset(
+        dataset,
+        frac_list=[0.5, 0.5, 0.0],
+        shuffle=True,
+        random_state=42,
+    )
+    add_sample_indices(train_data)
+    add_sample_indices(val_data)
+
+    train_loader, val_loader = MGLDataLoader(
+        train_data=train_data,
+        val_data=val_data,
+        collate_fn=collate_fn_pes,
+        batch_size=2,
+        num_workers=0,
+        generator=torch.Generator(device=device),
+    )
+    n_train = len(train_data)
+    n_val = len(val_data)
+    n_train_atoms = sum(train_data[i][0].num_nodes() for i in range(n_train))
+    n_val_atoms = sum(val_data[i][0].num_nodes() for i in range(n_val))
+
+    model = TensorNet(element_types=element_types, is_intensive=False)
+    lit_model = PotentialLightningModule(model=model, stress_weight=0.0, loss="mse_loss")
+    log_path = tmp_path / "predictions.pt"
+    logger_cb = PredictionLogger(save_path=log_path, log_train=True, log_validation=True)
+    n_epochs = 3
+    trainer = pl.Trainer(
+        max_epochs=n_epochs,
+        accelerator=device,
+        inference_mode=False,
+        num_sanity_val_steps=0,
+        enable_checkpointing=False,
+        logger=False,
+        callbacks=[logger_cb],
+    )
+    trainer.fit(model=lit_model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+    log = logger_cb.predictions
+    assert log["train_energy_preds"].shape == (n_epochs, n_train)
+    assert log["train_force_preds"].shape == (n_epochs, n_train_atoms, 3)
+    assert log["val_energy_preds"].shape == (n_epochs, n_val)
+    assert log["val_force_preds"].shape == (n_epochs, n_val_atoms, 3)
+    assert torch.allclose(
+        log["train_energy_errors"],
+        log["train_energy_preds"] - log["train_energy_labels"].unsqueeze(0),
+    )
+
+    assert log_path.exists()
+    on_disk = torch.load(log_path, weights_only=True)
+    assert torch.equal(on_disk["train_energy_preds"], log["train_energy_preds"])
+
+    teardown()

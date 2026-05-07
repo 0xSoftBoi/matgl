@@ -219,6 +219,8 @@ class QET(TensorNet):
 
         charge = self.qeq(g=g, total_charge=total_charge, chi=chi, hardness=hardness)
         elec_pot = self.elec_pot(g, charge=charge, sigma=sigma)
+        g.charge = charge
+        g.elec_pot = elec_pot
 
         feats = [x, charge.unsqueeze(dim=1), elec_pot.unsqueeze(dim=1)]
         if self.include_magmom:

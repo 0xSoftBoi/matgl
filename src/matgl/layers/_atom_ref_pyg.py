@@ -11,11 +11,11 @@ if TYPE_CHECKING:
     from torch_geometric.data import Data
 
 
-class AtomRefPyG(nn.Module):
+class AtomRef(nn.Module):
     """Get total property offset for a system."""
 
     def __init__(self, property_offset: torch.Tensor | None = None, max_z: int = 89) -> None:
-        """Initialize the AtomRefPyG.
+        """Initialize the AtomRef.
 
         Args:
             property_offset (Tensor): a tensor containing the property offset for each element

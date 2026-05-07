@@ -87,7 +87,11 @@ def collate_fn_graph(
 
 
 def collate_fn_pes(
-    batch: list, include_stress: bool = True, include_line_graph: bool = False, include_magmom: bool = False
+    batch: list,
+    include_stress: bool = True,
+    include_line_graph: bool = False,
+    include_magmom: bool = False,
+    include_charge: bool = False,
 ) -> tuple:
     """Merge a list of PyG Data objects to form a batch.
 
@@ -96,6 +100,7 @@ def collate_fn_pes(
         include_stress (bool): Whether to include stress tensors in the output
         include_line_graph (bool): Whether to include line graphs in the batch
         include_magmom (bool): Whether to include magnetic moments in the output
+        include_charge (bool): Whether to include per-atom charges in the output
 
     Returns:
         Tuple containing:
@@ -106,6 +111,7 @@ def collate_fn_pes(
         - f: Forces (num_atoms, 3)
         - s: Stresses (batch_size, 6) or zeros if include_stress=False
         - m: Magnetic moments (batch_size, ...) or zeros if include_magmom=False
+        - q: Per-atom charges concatenated across the batch (only when include_charge=True)
     """
     graphs, lattices, state_attr, labels = map(list, zip(*batch, strict=False))
 
@@ -118,10 +124,13 @@ def collate_fn_pes(
         else torch.zeros(e.size(0), dtype=matgl.float_th)
     )
     m = torch.vstack([d["magmoms"] for d in labels]) if include_magmom else torch.zeros(e.size(0), dtype=matgl.float_th)
+    q = torch.hstack([d["charges"] for d in labels]) if include_charge else torch.zeros(e.size(0), dtype=matgl.float_th)
     state_attr = torch.stack(state_attr)  # type:ignore[assignment]
     lat = lattices[0] if g.batch_size == 1 else torch.squeeze(torch.stack(lattices))
     if include_magmom:
         return g, lat.squeeze(), state_attr, e, f, s, m
+    if include_charge:
+        return g, lat.squeeze(), state_attr, e, f, s, q
     return g, lat.squeeze(), state_attr, e, f, s
 
 
@@ -164,6 +173,7 @@ class MGLDataset(Dataset):
         filename_state_attr: str = "state_attr.pt",
         filename_labels: str = "labels.json",
         include_line_graph: bool = False,
+        include_ref_charge: bool = False,
         converter: GraphConverter | None = None,
         structures: list | None = None,
         labels: dict[str, list] | None = None,
@@ -184,6 +194,7 @@ class MGLDataset(Dataset):
             filename_state_attr: File name for storing state attributes.
             filename_labels: File name for storing labels.
             include_line_graph: Whether to include line graphs.
+            include_ref_charge: Whether to attach reference charges as ``data.q_ref`` for use by QEq.
             converter: Graph converter for PyG (converts structures to Data objects).
             structures: Pymatgen structures.
             labels: Targets as a dict of {name: list of values}.
@@ -203,6 +214,7 @@ class MGLDataset(Dataset):
         self.filename_state_attr = filename_state_attr
         self.filename_labels = filename_labels
         self.include_line_graph = include_line_graph
+        self.include_ref_charge = include_ref_charge
         self.converter = converter
         self.structures = structures or []
         self.labels = labels or {}
@@ -247,6 +259,9 @@ class MGLDataset(Dataset):
                 data, lattice, state_attr = self.converter.get_graph(structure)
                 data = data.to(device="cpu")
                 lattice = lattice.to(device="cpu")
+
+                if self.include_ref_charge:
+                    data.q_ref = torch.tensor(self.labels["charges"][idx], dtype=matgl.float_th)
 
                 graphs.append(data)
                 lattices.append(lattice)

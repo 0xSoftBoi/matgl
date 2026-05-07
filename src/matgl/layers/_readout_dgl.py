@@ -115,36 +115,79 @@ class WeightedReadOut(nn.Module):
 
 
 class WeightedAtomReadOut(nn.Module):
-    """Weighted atom readout for graph properties."""
+    """Weighted atom readout for graph properties.
+
+    This follows the TensorFlow WeightedReadout implementation:
+
+        updated_field = mlp(field)
+        weights = weight_mlp(field)
+        factor = weights / sum(weights)
+        readout = sum(factor * updated_field)
+
+    where the normalization is done independently for each graph.
+    """
 
     def __init__(self, in_feats: int, dims: Sequence[int], activation: nn.Module):
-        """Initialize the WeightedAtomReadOut.
-
+        """
         Args:
-            in_feats: input features (nodes)
-            dims: NN architecture for Gated MLP
-            activation: activation function for multi-layer perceptons.
+            in_feats: Input node feature dimension.
+            dims: MLP architecture. The final entry is the output dimension.
+            activation: Activation function for multi-layer perceptrons.
         """
         super().__init__()
+
         self.dims = [in_feats, *dims]
         self.activation = activation
-        self.mlp = MLP(dims=self.dims, activation=self.activation, activate_last=True)
-        self.weight = nn.Sequential(nn.Linear(in_feats, 1), nn.Sigmoid())
+
+        # Equivalent to:
+        # self.mlp = MLP(neurons=neurons, activations=[activation] * n_layer)
+        self.mlp = MLP(
+            dims=self.dims,
+            activation=self.activation,
+            activate_last=True,
+        )
+
+        # Equivalent to:
+        # neurons = neurons[:-1] + [1]
+        # acts = [activation] * (n_layer - 1) + ["sigmoid"]
+        self.weight = MLP(
+            dims=[*self.dims[:-1], 1],
+            activation=self.activation,
+            activate_last=False,
+        )
+        self.weight_activation = nn.Sigmoid()
 
     def forward(self, g: dgl.DGLGraph):
-        """Run the weighted atom readout.
+        """Run weighted atom readout.
 
         Args:
-            g: DGL graph.
+            g: DGL graph with ``g.ndata["node_feat"]``.
 
         Returns:
-            atomic_properties: torch.Tensor.
+            atomic_properties: Tensor of shape ``[num_graphs, dims[-1]]``.
         """
         with g.local_scope():
-            g.ndata["h"] = self.mlp(g.ndata["node_feat"])
-            g.ndata["w"] = self.weight(g.ndata["node_feat"])
-            h_g_sum = dgl.sum_nodes(g, "h", "w")
-        return h_g_sum
+            field = g.ndata["node_feat"]
+
+            # updated_field = self.mlp(field)
+            g.ndata["updated_field"] = self.mlp(field)
+
+            # weights = self.weight(field)
+            g.ndata["weights"] = self.weight_activation(self.weight(field))
+
+            # sum_j w_j for each graph
+            weight_sum = dgl.sum_nodes(g, "weights")
+
+            # Broadcast graph-level sums back to nodes
+            g.ndata["weight_sum"] = dgl.broadcast_nodes(g, weight_sum)
+
+            # factor_i = w_i / sum_j w_j
+            g.ndata["factor"] = g.ndata["weights"] / g.ndata["weight_sum"].clamp(min=1e-8)
+
+            # sum_i factor_i * updated_field_i
+            readout = dgl.sum_nodes(g, "updated_field", "factor")
+
+        return readout
 
 
 class WeightedReadOutPair(nn.Module):
