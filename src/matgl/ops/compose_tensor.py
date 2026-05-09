@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch custom op wrappers for composing 3x3 tensors from I, A, S components."""
+
 from __future__ import annotations
 
 import torch
@@ -161,22 +163,26 @@ def _(
 
 
 def compose_tensor_setup_fwd_context(ctx, inputs, output):
+    """Save inputs for the compose_tensor forward autograd context."""
     (x, y, z) = inputs
     ctx.save_for_backward(x, y, z)
 
 
 def compose_tensor_setup_bwd_context(ctx, inputs, output):
+    """Save inputs for the compose_tensor backward autograd context."""
     (grad_output, x, y, z) = inputs
     ctx.save_for_backward(grad_output, x, y, z)
 
 
 @torch.compiler.allow_in_graph
 def compose_tensor_fwd(*args):
+    """Dispatch the compose_tensor forward primitive."""
     return torch.ops.tensornet.compose_tensor_fwd_primitive(*args)
 
 
 @torch.compiler.allow_in_graph
 def compose_tensor_bwd(ctx, grad_output):
+    """Dispatch the compose_tensor backward primitive."""
     x, y, z = ctx.saved_tensors
     dx, dy, dz = torch.ops.tensornet.compose_tensor_bwd_primitive(grad_output, x, y, z)
     return dx, dy, dz
@@ -184,6 +190,7 @@ def compose_tensor_bwd(ctx, grad_output):
 
 @torch.compiler.allow_in_graph
 def compose_tensor_bwd_bwd(ctx, *grad_outputs):
+    """Dispatch the compose_tensor double-backward primitive."""
     grad_grad_x = grad_outputs[0][0]
     grad_grad_y = grad_outputs[0][1]
     grad_grad_z = grad_outputs[0][2]
@@ -218,5 +225,5 @@ torch.library.register_autograd(
 
 
 def fn_compose_tensor(x: Tensor, y: Tensor, z: Tensor) -> Tensor:
-    output = torch.ops.tensornet.compose_tensor_fwd_primitive(x, y, z)
-    return output
+    """Compose a 3x3 tensor from its isotropic, antisymmetric, and traceless symmetric components."""
+    return torch.ops.tensornet.compose_tensor_fwd_primitive(x, y, z)

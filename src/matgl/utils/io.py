@@ -28,8 +28,9 @@ _PUBLIC_PACKAGE_PREFIXES: tuple[str, ...] = ("matgl.models.", "matgl.apps._pes")
 
 
 def _resolve_module(modname: str) -> str:
-    """Map a private ``matgl.models._*`` / ``matgl.apps._pes_*`` ``@module`` string
-    to its public package (``matgl.models`` / ``matgl.apps.pes``).
+    """Map a private ``matgl.models._*`` / ``matgl.apps._pes_*`` ``@module`` string to its public package.
+
+    Resolves to ``matgl.models`` or ``matgl.apps.pes`` as appropriate.
     """
     if modname.startswith("matgl.models._"):
         return "matgl.models"

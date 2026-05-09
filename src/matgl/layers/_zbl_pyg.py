@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from ase.data import atomic_numbers
+from torch import nn
 from torch_geometric.nn import MessagePassing, global_add_pool
 from torch_geometric.utils import scatter
 

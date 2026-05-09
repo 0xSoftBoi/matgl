@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch custom op wrappers for TensorNet message passing (forward, backward, double-backward)."""
+
 from __future__ import annotations
 
 import torch
@@ -372,6 +374,7 @@ def _(
 
 
 def message_passing_setup_fwd_context(ctx, inputs, output):
+    """Save inputs for the message-passing forward autograd context."""
     (
         x,
         y,
@@ -399,6 +402,7 @@ def message_passing_setup_fwd_context(ctx, inputs, output):
 
 
 def message_passing_setup_bwd_context(ctx, inputs, output):
+    """Save inputs for the message-passing backward autograd context."""
     (
         grad_output_x,
         grad_output_y,
@@ -433,11 +437,13 @@ def message_passing_setup_bwd_context(ctx, inputs, output):
 
 @torch.compiler.allow_in_graph
 def message_passing_fwd(*args):
+    """Dispatch the message-passing forward primitive."""
     return torch.ops.tensornet.message_passing_fwd_primitive(*args)
 
 
 @torch.compiler.allow_in_graph
 def message_passing_bwd(ctx, grad_outputs):
+    """Dispatch the message-passing backward primitive."""
     (
         x,
         y,
@@ -474,6 +480,7 @@ def message_passing_bwd(ctx, grad_outputs):
 
 @torch.compiler.allow_in_graph
 def message_passing_bwd_bwd(ctx, *grad_outputs):
+    """Dispatch the message-passing double-backward primitive."""
     grad_grad_x, grad_grad_y, grad_grad_z, grad_grad_edge_attr = grad_outputs[0]
 
     (
@@ -554,6 +561,7 @@ def fn_message_passing(
     col_indices: Tensor,
     col_indptr: Tensor,
 ) -> list[Tensor]:
+    """Run TensorNet message passing on (I, A, S) node features and edge attributes."""
     return torch.ops.tensornet.message_passing_fwd_primitive(
         x,
         y,

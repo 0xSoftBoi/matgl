@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 if TYPE_CHECKING:
     import dgl

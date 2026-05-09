@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch custom op wrappers for TensorNet radial message passing (forward, backward, double-backward)."""
+
 from __future__ import annotations
 
 import torch
@@ -280,11 +282,13 @@ def _(
 
 
 def radial_message_passing_setup_fwd_context(ctx, inputs, output):
+    """Save inputs for the radial-message-passing forward autograd context."""
     (edge_vec_norm, edge_attr, row_data, row_indptr) = inputs
     ctx.save_for_backward(edge_vec_norm, edge_attr, row_data, row_indptr)
 
 
 def radial_message_passing_setup_bwd_context(ctx, inputs, output):
+    """Save inputs for the radial-message-passing backward autograd context."""
     (
         grad_output_I,
         grad_output_A,
@@ -307,11 +311,13 @@ def radial_message_passing_setup_bwd_context(ctx, inputs, output):
 
 @torch.compiler.allow_in_graph
 def radial_message_passing_fwd(*args):
+    """Dispatch the radial-message-passing forward primitive."""
     return torch.ops.tensornet.radial_message_passing_fwd_primitive(*args)
 
 
 @torch.compiler.allow_in_graph
 def radial_message_passing_bwd(ctx, grad_outputs):
+    """Dispatch the radial-message-passing backward primitive."""
     edge_vec_norm, edge_attr, row_data, row_indptr = ctx.saved_tensors
 
     result = torch.ops.tensornet.radial_message_passing_bwd_primitive(
@@ -331,6 +337,7 @@ def radial_message_passing_bwd(ctx, grad_outputs):
 
 @torch.compiler.allow_in_graph
 def radial_message_passing_bwd_bwd(ctx, *grad_outputs):
+    """Dispatch the radial-message-passing double-backward primitive."""
     grad_grad_edge_vec_norm, grad_grad_edge_attr = grad_outputs[0]
     (
         grad_output_I,
@@ -389,4 +396,5 @@ torch.library.register_autograd(
 def fn_radial_message_passing(
     edge_vec_norm: Tensor, edge_attr: Tensor, row_data: Tensor, row_indptr: Tensor
 ) -> list[Tensor]:
+    """Run TensorNet radial message passing to produce (I, A, S) node-feature contributions."""
     return torch.ops.tensornet.radial_message_passing_fwd_primitive(edge_vec_norm, edge_attr, row_data, row_indptr)

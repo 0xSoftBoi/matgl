@@ -36,6 +36,7 @@ def count_row_col(
     row_count: wp.array(ndim=1, dtype=wp.int32),
     col_count: wp.array(ndim=1, dtype=wp.int32),
 ):
+    """Count edges per source row and destination column for CSR conversion."""
     tid = wp.tid()
 
     shift = edge_index.dtype(1)
@@ -55,6 +56,7 @@ def convert_to_sparse(
     row_data: wp.array(ndim=1, dtype=wp.int32),
     col_data: wp.array(ndim=1, dtype=wp.int32),
 ):
+    """Convert an edge index list to CSR row/column indptr+indices arrays."""
     tid = wp.tid()
     shift = edge_index.dtype(1)
 

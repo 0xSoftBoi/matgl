@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch custom op wrappers for SO(3)-equivariant 3x3 matrix multiplication."""
+
 from __future__ import annotations
 
 import torch
@@ -164,22 +166,26 @@ def _(grad_output: Tensor, grad_grad_x: Tensor, grad_grad_y: Tensor, x: Tensor, 
 
 
 def tensor_matmul_so3_3x3_setup_fwd_context(ctx, inputs, output):
+    """Save inputs for the SO(3) 3x3 matmul forward autograd context."""
     (x, y) = inputs
     ctx.save_for_backward(x, y)
 
 
 def tensor_matmul_so3_3x3_setup_bwd_context(ctx, inputs, output):
+    """Save inputs for the SO(3) 3x3 matmul backward autograd context."""
     (grad_output, x, y) = inputs
     ctx.save_for_backward(grad_output, x, y)
 
 
 @torch.compiler.allow_in_graph
 def tensor_matmul_so3_3x3_fwd(*args):
+    """Dispatch the SO(3) 3x3 matmul forward primitive."""
     return torch.ops.tensornet.tensor_matmul_so3_3x3_fwd_primitive(*args)
 
 
 @torch.compiler.allow_in_graph
 def tensor_matmul_so3_3x3_bwd(ctx, grad_output):
+    """Dispatch the SO(3) 3x3 matmul backward primitive."""
     x, y = ctx.saved_tensors
     dx, dy = torch.ops.tensornet.tensor_matmul_so3_3x3_bwd_primitive(grad_output, x, y)
     return dx, dy
@@ -187,6 +193,7 @@ def tensor_matmul_so3_3x3_bwd(ctx, grad_output):
 
 @torch.compiler.allow_in_graph
 def tensor_matmul_so3_3x3_bwd_bwd(ctx, *grad_outputs):
+    """Dispatch the SO(3) 3x3 matmul double-backward primitive."""
     grad_grad_x = grad_outputs[0][0]
     grad_grad_y = grad_outputs[0][1]
 
@@ -217,5 +224,5 @@ torch.library.register_autograd(
 
 
 def fn_tensor_matmul_so3_3x3(x: Tensor, y: Tensor) -> Tensor:
-    z = torch.ops.tensornet.tensor_matmul_so3_3x3_fwd_primitive(x, y)
-    return z
+    """Apply the SO(3)-equivariant 3x3 matmul to a pair of tensor batches."""
+    return torch.ops.tensornet.tensor_matmul_so3_3x3_fwd_primitive(x, y)

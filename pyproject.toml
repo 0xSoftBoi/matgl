@@ -57,7 +57,7 @@ dependencies = [
     "pymatgen-core>=2026.4.16",
     "huggingface_hub>=0.24",
 ]
-version = "3.0.1"
+version = "3.0.2"
 
 [project.scripts]
 mgl = "matgl.cli:main"
@@ -142,17 +142,22 @@ lint.select = [
     "YTT", # flake8-2020
 ]
 lint.ignore = [
-    "B019", # functools.lru_cache on methods can lead to memory leaks
-    "D105", # Missing docstring in magic method
-    "D205", # 1 blank line required between summary line and description
-    "D212", # Multi-line docstring summary should start at the first line
-    "PERF203", # try-except-in-loop
-    "PLR", # pylint refactor
-    "PLW0603", # Using the global statement to update variables is discouraged
-    "PLW2901", # redefined-loop-name
-    "RET504", # unnecessary-assign
-    "SIM105", # Use contextlib.suppress(OSError) instead of try-except-pass
-    "PLC0415", # `import` should be at the top-level of a file
+    # Layer modules use ``lru_cache`` to memoize symbolic basis function generation;
+    # they are constructed once and live for the program's lifetime, so the
+    # method-level cache cannot leak in practice.
+    "B019",
+    # Lazy imports are used throughout to (a) avoid forcing optional deps
+    # (DGL, scipy, full ``pymatgen``, ``nvalchemiops``) at import time and
+    # (b) prevent backend cross-contamination between PYG and DGL paths.
+    "PLC0415",
+    # Pylint refactor rules — ML model ``__init__``/``forward`` methods inherently
+    # have many hyperparameters/branches/statements; magic values like
+    # ``dim() == 3`` (3D check) or ``el.Z < 95`` (atomic number cutoff) are
+    # clearer than named constants.
+    "PLR0912",  # too-many-branches
+    "PLR0913",  # too-many-arguments
+    "PLR0915",  # too-many-statements
+    "PLR2004",  # magic-value-comparison
 ]
 lint.pydocstyle.convention = "google"
 lint.isort.required-imports = ["from __future__ import annotations"]
@@ -162,8 +167,18 @@ lint.isort.required-imports = ["from __future__ import annotations"]
 "tests/**/*" = ["D", "PERF"]
 "docs/**/*" = ["D"]
 "examples/**/*" = ["D"]
-"src/matgl/kernels/*" = ["D100", "D103", "E741", "I002"]
-"src/matgl/ops/*" = ["D100", "D103"]
+"scripts/**/*" = ["D", "PERF"]
+# Warp parses kernel function annotations at decoration time to compile to GPU
+# code, so ``from __future__ import annotations`` (I002) cannot be used. Tensor
+# decomposition components ``I``, ``A``, ``S`` (E741) follow physics conventions
+# and should not be renamed.
+"src/matgl/kernels/*" = ["E741", "I002"]
+# GRACE / ACE machinery uses ``l`` as the canonical angular-momentum index
+# throughout (matches the physics literature and the upstream gracemaker
+# implementation). Renaming would obscure the math.
+"src/matgl/layers/_grace.py" = ["E741"]
+"src/matgl/models/_grace.py" = ["E741"]
+"tests/models/test_grace_parity_tp.py" = ["E741"]
 
 [tool.pytest.ini_options]
 addopts = "--durations=30 --quiet -rXs --color=yes -p no:warnings"
@@ -171,7 +186,11 @@ addopts = "--durations=30 --quiet -rXs --color=yes -p no:warnings"
 [tool.mypy]
 ignore_missing_imports = true
 no_implicit_optional = false
-exclude = ['examples', 'tests']
+# ``dev`` holds local development scripts (refactor helpers, validators,
+# ad-hoc reproducers). Not part of the installed package, so we don't
+# typecheck it alongside ``src/matgl``. mypy v2 walks more files by
+# default than v1.20, which is why this exclusion is needed now.
+exclude = ['examples', 'tests', 'dev']
 
 [[tool.mypy.overrides]]
 module = ["requests.*", "tabulate.*"]

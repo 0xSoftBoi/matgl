@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 import dgl
 import torch
-import torch.nn as nn
+from torch import nn
 
 import matgl.layers._so3 as so3
 from matgl.config import DEFAULT_ELEMENTS
@@ -173,43 +173,42 @@ class SO3Net(MatGLModel):
                     dims=[units, units],
                     num_targets=ntargets,  # type: ignore
                 )
-        else:  # graph property, dipole_moment or polarizability
-            if target_property == "graph":
-                input_feats = dim_node_embedding
-                if readout_type == "set2set":
-                    self.readout = Set2SetReadOut(
-                        in_feats=input_feats, n_iters=niters_set2set, n_layers=nlayers_set2set, field="node_feat"
-                    )
-                    readout_feats = 2 * input_feats + dim_state_feats if include_state else 2 * input_feats  # type: ignore
-                elif readout_type == "weighted_atom":
-                    self.readout = WeightedAtomReadOut(in_feats=input_feats, dims=[units, units], activation=activation)  # type:ignore[assignment]
-                    readout_feats = units + dim_state_feats if include_state else units  # type: ignore
-                else:
-                    self.readout = ReduceReadOut("mean", field="node_feat")  # type: ignore
-                    readout_feats = input_feats + dim_state_feats if include_state else input_feats  # type: ignore
-
-                dims_final_layer = [readout_feats, units, units, ntargets]
-                self.final_layer = MLP(dims_final_layer, activation, activate_last=False)
-                if task_type == "classification":
-                    self.sigmoid = nn.Sigmoid()
+        elif target_property == "graph":
+            input_feats = dim_node_embedding
+            if readout_type == "set2set":
+                self.readout = Set2SetReadOut(
+                    in_feats=input_feats, n_iters=niters_set2set, n_layers=nlayers_set2set, field="node_feat"
+                )
+                readout_feats = 2 * input_feats + dim_state_feats if include_state else 2 * input_feats  # type: ignore
+            elif readout_type == "weighted_atom":
+                self.readout = WeightedAtomReadOut(in_feats=input_feats, dims=[units, units], activation=activation)  # type:ignore[assignment]
+                readout_feats = units + dim_state_feats if include_state else units  # type: ignore
             else:
-                dim_readout_layers = [dim_node_embedding, units, units, ntargets]
-                if target_property == "polarizability":
-                    use_vector_representation = True
-                if use_vector_representation:
-                    self.readout = build_gated_equivariant_mlp(  # type: ignore
-                        n_in=dim_node_embedding,
-                        n_out=ntargets,
-                        n_hidden=units,
-                        n_layers=nlayers_readout,
-                        activation=activation,
-                        sactivation=activation,
-                    )
+                self.readout = ReduceReadOut("mean", field="node_feat")  # type: ignore
+                readout_feats = input_feats + dim_state_feats if include_state else input_feats  # type: ignore
 
-                else:
-                    self.readout = MLP(  # type: ignore
-                        dims=dim_readout_layers, activation=activation, activate_last=True, bias_last=True
-                    )
+            dims_final_layer = [readout_feats, units, units, ntargets]
+            self.final_layer = MLP(dims_final_layer, activation, activate_last=False)
+            if task_type == "classification":
+                self.sigmoid = nn.Sigmoid()
+        else:
+            dim_readout_layers = [dim_node_embedding, units, units, ntargets]
+            if target_property == "polarizability":
+                use_vector_representation = True
+            if use_vector_representation:
+                self.readout = build_gated_equivariant_mlp(  # type: ignore
+                    n_in=dim_node_embedding,
+                    n_out=ntargets,
+                    n_hidden=units,
+                    n_layers=nlayers_readout,
+                    activation=activation,
+                    sactivation=activation,
+                )
+
+            else:
+                self.readout = MLP(  # type: ignore
+                    dims=dim_readout_layers, activation=activation, activate_last=True, bias_last=True
+                )
 
     def forward(self, g: dgl.DGLGraph, total_charges: torch.Tensor | None = None, **kwargs):
         """Performs message passing and updates node representations.

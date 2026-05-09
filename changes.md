@@ -6,36 +6,12 @@ nav_order: 3
 
 # Change Log
 
-## Unreleased
-- Added a LAMMPS-export wrapper, `matgl.ext.lammps.LAMMPSMatGLModel`, plus an
-  `mgl create-lammps-model` CLI subcommand. Wraps a TensorNet (PyG) `Potential`
-  in a TorchScript-friendly module that takes Cartesian positions, edge
-  connectivity, integer image shifts, cell, atomic numbers, and a ghost mask
-  and returns total local energy / per-atom energies / forces / virials.
-  Phase 1 of the matgl LAMMPS-Kokkos plugin. Several upstream PyG layers
-  gained explicit type annotations to make TorchScript export work — pure
-  additions, no runtime behaviour changed.
-- Added the C++ side of the LAMMPS plugin under `lammps/`:
-  `pair_matgl` (CPU/serial pair style, manybody), a CMake snippet, a sample
-  input deck, and a Python reference helper. Phase 2 of the plugin.
-- Added the Kokkos GPU/host variant `pair_matgl/kk` under
-  `lammps/src/KOKKOS/`, a matching `cmake/ML-MATGL-KOKKOS.cmake` snippet,
-  and a `lammps-build` GitHub Actions workflow that compiles the CPU pair
-  style inside the public `lammps/lammps-build` Docker image and parity-checks
-  the resulting LAMMPS run against the Python ASE calculator. Phase 3 of
-  the plugin; CUDA CI (real GPU runs) is deferred to a self-hosted runner.
-- Extended `LAMMPSMatGLModel` to support **M3GNet (PyG)** in addition to
-  TensorNet. The wrapper restructures into a kernel-composition pattern
-  (`_TensorNetKernel` / `_M3GNetKernel`); the M3GNet kernel ships a
-  TorchScript-friendly tensor-only port of the smooth spherical Bessel +
-  Y_l^0 basis (avoiding the sympy-lambdified Python lists in
-  `SphericalBesselFunction` / `SphericalHarmonicsFunction`) and a tensor-only
-  3-body line-graph builder (`create_line_graph_torch` /
-  `_compute_3body_indices_torch`). Currently requires
-  `rbf_type='SphericalBessel'`, `use_smooth=True`, `use_phi=False` — the
-  standard M3GNet PES configuration. Tests parametrize over both
-  architectures; QET still deferred (charge head + LAMMPS `atom_style charge`
-  wiring).
+## 3.0.2
+- New `matgl.utils.callbacks.PredictionLogger` Lightning callback for capturing per-epoch energy and per-atom force   predictions, ground truth, and errors during `PotentialLightningModule` training. Pairs with   `add_sample_indices(dataset)` to keep `(n_epochs, n_samples)` log columns in a stable per-sample order across
+  shuffled training epochs. The callback persists the cumulative log to disk every epoch end so it survives a
+  walltime cut. `PredictionLogger` also logs stress and per-atom charge whenever the wrapped potential computes them
+  (`model.calc_stresses` / `model.calc_charge`); pass `log_stress=False` or `log_charge=False` to opt out. New keys in the saved payload: `{train,val}_stress_{preds,labels,errors}` shape `(n_epochs, n_samples, 3, 3)` and
+  `{train,val}_charge_{preds,labels,errors}` shape `(n_epochs, n_atoms)`. (#777)
 
 ## 3.0.1
 - PyG charge-training parity for `QET`. `PotentialLightningModule` now accepts `charge_weight` and adds a per-atom

@@ -1,6 +1,6 @@
-"""DGL-specific embedding modules (TensorNet ``TensorEmbedding`` /
-``NeighborEmbedding``). The backend-agnostic ``EmbeddingBlock`` lives in
-``matgl.layers._embedding``.
+"""DGL-specific embedding modules (TensorNet ``TensorEmbedding`` / ``NeighborEmbedding``).
+
+The backend-agnostic ``EmbeddingBlock`` lives in ``matgl.layers._embedding``.
 """
 
 from __future__ import annotations
@@ -122,8 +122,7 @@ class TensorEmbedding(nn.Module):
         scalars = Zij[..., None, None] * edges.data.pop("Iij")
         skew_matrices = Zij[..., None, None] * edges.data.pop("Aij")
         traceless_tensors = Zij[..., None, None] * edges.data.pop("Sij")
-        mij = {"I": scalars, "A": skew_matrices, "S": traceless_tensors}
-        return mij
+        return {"I": scalars, "A": skew_matrices, "S": traceless_tensors}
 
     def edge_update_(self, graph: dgl.DGLGraph) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Perform edge update.
@@ -294,5 +293,4 @@ class NeighborEmbedding(nn.Module):
             dtype=node_feat.dtype,
             device=node_feat.device,
         ).index_add(0, edge_index[0], msg)
-        x_neighbors = self.combine(torch.cat([node_feat, x_neighbors], dim=1))
-        return x_neighbors
+        return self.combine(torch.cat([node_feat, x_neighbors], dim=1))

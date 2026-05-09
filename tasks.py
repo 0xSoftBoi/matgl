@@ -116,7 +116,7 @@ def release(ctx, version):
         "prerelease": False,
     }
     response = requests.post(
-        "https://api.github.com/repos/materialsvirtuallab/matgl/releases",
+        "https://api.github.com/repos/materialyzeai/matgl/releases",
         data=json.dumps(payload),
         headers={"Authorization": "token " + os.environ["GITHUB_RELEASES_TOKEN"]},
     )

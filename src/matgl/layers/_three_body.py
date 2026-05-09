@@ -94,9 +94,7 @@ class ThreeBodyInteractions(nn.Module):
             return edge_feat
 
         # Update edge features using the bond update network
-        updated_edge_feat = edge_feat + self.update_network_bond(new_bonds)
-
-        return updated_edge_feat
+        return edge_feat + self.update_network_bond(new_bonds)
 
 
 def combine_sbf_shf(sbf, shf, max_n: int, max_l: int, use_phi: bool):

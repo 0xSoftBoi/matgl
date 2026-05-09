@@ -118,14 +118,22 @@ def MGLDataLoader(
     if collate_fn is None:
         if "forces" not in train_data.dataset.labels:
             collate_fn = collate_fn_graph
+        elif "stresses" not in train_data.dataset.labels:
+            collate_fn = partial(collate_fn_pes, include_stress=False)
+        elif "magmoms" not in train_data.dataset.labels:
+            collate_fn = collate_fn_pes
         else:
-            if "stresses" not in train_data.dataset.labels:
-                collate_fn = partial(collate_fn_pes, include_stress=False)
-            else:
-                if "magmoms" not in train_data.dataset.labels:
-                    collate_fn = collate_fn_pes
-                else:
-                    collate_fn = partial(collate_fn_pes, include_stress=True, include_magmom=True)
+            collate_fn = partial(collate_fn_pes, include_stress=True, include_magmom=True)
+
+    # Apply the same DataLoader defaults the PyG path uses: a small worker pool,
+    # ``pin_memory`` when CUDA is visible, and persistent workers across epochs.
+    # Explicit user kwargs always win.
+    if "num_workers" not in kwargs:
+        kwargs["num_workers"] = min(4, os.cpu_count() or 1)
+    if "pin_memory" not in kwargs:
+        kwargs["pin_memory"] = torch.cuda.is_available()
+    if "persistent_workers" not in kwargs and kwargs.get("num_workers", 0) > 0:
+        kwargs["persistent_workers"] = True
 
     train_loader = GraphDataLoader(train_data, shuffle=True, collate_fn=collate_fn, **kwargs)
     val_loader = GraphDataLoader(val_data, shuffle=False, collate_fn=collate_fn, **kwargs)

@@ -242,8 +242,7 @@ def _scatter_add(x: torch.Tensor, idx_i: torch.Tensor, dim_size: int, dim: int =
     shape = list(x.shape)
     shape[dim] = dim_size
     tmp = torch.zeros(shape, dtype=x.dtype, device=x.device)
-    y = tmp.index_add(dim, idx_i, x)
-    return y
+    return tmp.index_add(dim, idx_i, x)
 
 
 def scatter_mean(
@@ -301,9 +300,7 @@ def _scatter_mean(
     count = count_tmp.index_add(dim, idx_i, ones)
     count = torch.clamp(count, min=1.0)
 
-    y = y / count
-
-    return y
+    return y / count
 
 
 def unsorted_segment_fraction(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int):
@@ -399,8 +396,7 @@ def vector_to_symtensor(vector: torch.Tensor):
     scalars = (tensor.diagonal(offset=0, dim1=-1, dim2=-2)).mean(-1)[..., None, None] * torch.eye(
         3, 3, device=tensor.device, dtype=tensor.dtype
     )
-    traceless_tensors = 0.5 * (tensor + tensor.transpose(-2, -1)) - scalars
-    return traceless_tensors
+    return 0.5 * (tensor + tensor.transpose(-2, -1)) - scalars
 
 
 # Full tensor decomposition into irreducible components

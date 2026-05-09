@@ -110,8 +110,7 @@ class WeightedReadOut(nn.Module):
         Returns:
             atomic_properties: torch.Tensor.
         """
-        atomic_properties = self.gated(g.ndata["node_feat"])
-        return atomic_properties
+        return self.gated(g.ndata["node_feat"])
 
 
 class WeightedAtomReadOut(nn.Module):
@@ -128,7 +127,8 @@ class WeightedAtomReadOut(nn.Module):
     """
 
     def __init__(self, in_feats: int, dims: Sequence[int], activation: nn.Module):
-        """
+        """Initialize the readout module.
+
         Args:
             in_feats: Input node feature dimension.
             dims: MLP architecture. The final entry is the output dimension.
@@ -185,9 +185,7 @@ class WeightedAtomReadOut(nn.Module):
             g.ndata["factor"] = g.ndata["weights"] / g.ndata["weight_sum"].clamp(min=1e-8)
 
             # sum_i factor_i * updated_field_i
-            readout = dgl.sum_nodes(g, "updated_field", "factor")
-
-        return readout
+            return dgl.sum_nodes(g, "updated_field", "factor")
 
 
 class WeightedReadOutPair(nn.Module):

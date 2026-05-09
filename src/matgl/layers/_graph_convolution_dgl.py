@@ -73,8 +73,7 @@ class MEGNetGraphConv(Module):
         u = edges.src["u"]
         eij = edges.data.pop("e")
         inputs = torch.hstack([vi, vj, eij, u])
-        mij = {"mij": self.edge_func(inputs)}
-        return mij
+        return {"mij": self.edge_func(inputs)}
 
     def edge_update_(self, graph: dgl.DGLGraph) -> Tensor:
         """Perform edge update.
@@ -122,8 +121,7 @@ class MEGNetGraphConv(Module):
         u_edge = torch.squeeze(u_edge)
         u_vertex = torch.squeeze(u_vertex)
         inputs = torch.hstack([state_feat.squeeze(), u_edge, u_vertex])
-        state_feat = self.state_func(inputs)
-        return state_feat
+        return self.state_func(inputs)
 
     def forward(
         self,
@@ -320,8 +318,7 @@ class M3GNetGraphConv(Module):
         eij = edges.data.pop("e")
         rbf = edges.data["rbf"]
         inputs = torch.hstack([vi, vj, eij, u]) if self.include_state else torch.hstack([vi, vj, eij])  # type:ignore[list-item]
-        mij = {"mij": self.edge_update_func(inputs) * self.edge_weight_func(rbf)}
-        return mij
+        return {"mij": self.edge_update_func(inputs) * self.edge_weight_func(rbf)}
 
     def edge_update_(self, graph: dgl.DGLGraph) -> Tensor:
         """Perform edge update.
@@ -333,8 +330,7 @@ class M3GNetGraphConv(Module):
         edge_update: edge features update
         """
         graph.apply_edges(self._edge_udf)
-        edge_update = graph.edata.pop("mij")
-        return edge_update
+        return graph.edata.pop("mij")
 
     def node_update_(self, graph: dgl.DGLGraph, state_feat: Tensor) -> Tensor:
         """Perform node update.
@@ -358,8 +354,7 @@ class M3GNetGraphConv(Module):
         else:
             inputs = torch.hstack([vi, vj, eij])
         graph.edata["mess"] = self.node_update_func(inputs) * self.node_weight_func(rbf)
-        node_update = scatter_add(graph.edata["mess"], src_id, dim=0, dim_size=graph.num_nodes())
-        return node_update
+        return scatter_add(graph.edata["mess"], src_id, dim=0, dim_size=graph.num_nodes())
 
     def state_update_(self, graph: dgl.DGLGraph, state_feat: Tensor) -> Tensor:
         """Perform attribute (global state) update.
@@ -374,8 +369,7 @@ class M3GNetGraphConv(Module):
         u = state_feat
         uv = dgl.readout_nodes(graph, feat="v", op="mean")
         inputs = torch.hstack([u, uv])
-        state_feat = self.state_update_func(inputs)  # type: ignore
-        return state_feat
+        return self.state_update_func(inputs)  # type: ignore
 
     def forward(
         self,
@@ -559,8 +553,7 @@ class TensorNetInteraction(nn.Module):
         scalars, skew_metrices, traceless_tensors = new_radial_tensor(
             I_j, A_j, S_j, edge_attr[..., 0], edge_attr[..., 1], edge_attr[..., 2]
         )
-        mij = {"I": scalars, "A": skew_metrices, "S": traceless_tensors}
-        return mij
+        return {"I": scalars, "A": skew_metrices, "S": traceless_tensors}
 
     def edge_update_(self, graph: dgl.DGLGraph) -> dgl.DGLGraph:
         """Perform edge update.
@@ -636,8 +629,7 @@ class TensorNetInteraction(nn.Module):
             skew_metrices = self.linears_tensor[4](skew_metrices.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
             traceless_tensors = self.linears_tensor[5](traceless_tensors.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
             dX = scalars + skew_metrices + traceless_tensors
-            X = X + dX + torch.matmul(dX, dX)
-        return X
+            return X + dX + torch.matmul(dX, dX)
 
 
 class CHGNetGraphConv(nn.Module):
@@ -841,9 +833,7 @@ class CHGNetGraphConv(nn.Module):
         graph.update_all(fn.copy_e("message", "message"), fn.sum("message", "feat_update"))
 
         # update nodes
-        node_update = self.node_out_func(graph.ndata["feat_update"])  # the bond update
-
-        return node_update
+        return self.node_out_func(graph.ndata["feat_update"])  # the bond update
 
     def state_update_(self, graph: dgl.DGLGraph, state_attr: Tensor) -> Tensor:
         """Perform attribute (global state) update.
@@ -857,8 +847,7 @@ class CHGNetGraphConv(nn.Module):
         """
         node_avg = dgl.readout_nodes(graph, feat="features", op="mean")
         inputs = torch.hstack([state_attr, node_avg])
-        state_attr = self.state_update_func(inputs)  # type: ignore
-        return state_attr
+        return self.state_update_func(inputs)  # type: ignore
 
     def forward(
         self,
@@ -1142,8 +1131,7 @@ class CHGNetLineGraphConv(nn.Module):
             edge_update: edge features update
         """
         graph.apply_edges(self._edge_udf)
-        edge_update = graph.edata["feat_update"]
-        return edge_update
+        return graph.edata["feat_update"]
 
     def node_update_(self, graph: dgl.DGLGraph, shared_weights: Tensor | None) -> Tensor:
         """Perform node update -> update bond features.
@@ -1181,9 +1169,7 @@ class CHGNetLineGraphConv(nn.Module):
         graph.update_all(fn.copy_e("message", "message"), fn.sum("message", "feat_update"))
 
         # update nodes
-        node_update = self.node_out_func(graph.ndata["feat_update"])  # the bond update
-
-        return node_update
+        return self.node_out_func(graph.ndata["feat_update"])  # the bond update
 
     def forward(
         self,

@@ -71,6 +71,7 @@ class Normalizer(Transformer):
         return data * self.std + self.mean
 
     def __repr__(self):
+        """Return a string representation of the Normalizer."""
         mean, std = self.mean, self.std
         return f"Normalizer({mean=}, {std=})"
 
@@ -114,4 +115,5 @@ class LogTransformer(Transformer):
         return torch.exp(data)
 
     def __repr__(self):
+        """Return a string representation of the LogTransformer."""
         return "LogTransformer"

@@ -105,12 +105,11 @@ def create_line_graph(
             g, feat_name="bond_dist", condition=lambda x: x > threebody_cutoff
         )
         try:
-            lg = (
+            return (
                 _create_directed_line_graph(graph_with_three_body)
                 if directed
                 else _compute_3body(graph_with_three_body)
             )
-            return lg
         except Exception as e:
             # Print a warning if the first attempt fails
             warnings.warn(
@@ -122,18 +121,16 @@ def create_line_graph(
             graph_with_three_body = prune_edges_by_features(
                 g, feat_name="bond_dist", condition=lambda x: x > threebody_cutoff + numerical_noise
             )
-            lg = (
+            return (
                 _create_directed_line_graph(graph_with_three_body)
                 if directed
                 else _compute_3body(graph_with_three_body)
             )
-            return lg
     else:
         graph_with_three_body = prune_edges_by_features(
             g, feat_name="bond_dist", condition=lambda x: x > threebody_cutoff
         )
-        lg = _create_directed_line_graph(graph_with_three_body) if directed else _compute_3body(graph_with_three_body)
-        return lg
+        return _create_directed_line_graph(graph_with_three_body) if directed else _compute_3body(graph_with_three_body)
 
 
 def ensure_line_graph_compatibility(

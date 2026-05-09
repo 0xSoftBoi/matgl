@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch custom op wrappers for decomposing a 3x3 tensor into I, A, S (isotropic / antisymmetric / traceless) parts."""
+
 from __future__ import annotations
 
 import torch
@@ -165,22 +167,26 @@ def _(
 
 
 def decompose_tensor_setup_fwd_context(ctx, inputs, output):
+    """Save inputs for the decompose_tensor forward autograd context."""
     (x,) = inputs  # Unpack the single input tensor
     ctx.save_for_backward(x)
 
 
 def decompose_tensor_setup_bwd_context(ctx, inputs, output):
+    """Save inputs for the decompose_tensor backward autograd context."""
     (grad_output_i, grad_output_a, grad_output_s, x) = inputs
     ctx.save_for_backward(grad_output_i, grad_output_a, grad_output_s, x)
 
 
 @torch.compiler.allow_in_graph
 def decompose_tensor_fwd(*args):
+    """Dispatch the decompose_tensor forward primitive."""
     return torch.ops.tensornet.decompose_tensor_fwd_primitive(*args)
 
 
 @torch.compiler.allow_in_graph
 def decompose_tensor_bwd(ctx, *grad_outputs):
+    """Dispatch the decompose_tensor backward primitive."""
     (x,) = ctx.saved_tensors
     grad_output_i, grad_output_a, grad_output_s = grad_outputs[0]
     dx = torch.ops.tensornet.decompose_tensor_bwd_primitive(grad_output_i, grad_output_a, grad_output_s, x)
@@ -189,6 +195,7 @@ def decompose_tensor_bwd(ctx, *grad_outputs):
 
 @torch.compiler.allow_in_graph
 def decompose_tensor_bwd_bwd(ctx, *grad_outputs):
+    """Dispatch the decompose_tensor double-backward primitive."""
     (grad_grad_x,) = grad_outputs[0]
 
     grad_output_i, grad_output_a, grad_output_s, x = ctx.saved_tensors
@@ -217,5 +224,5 @@ torch.library.register_autograd(
 
 
 def fn_decompose_tensor(x: Tensor) -> list[Tensor]:
-    output = torch.ops.tensornet.decompose_tensor_fwd_primitive(x)
-    return output
+    """Decompose a 3x3 tensor into its isotropic, antisymmetric, and traceless symmetric parts."""
+    return torch.ops.tensornet.decompose_tensor_fwd_primitive(x)

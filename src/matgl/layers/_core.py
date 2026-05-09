@@ -279,5 +279,4 @@ def build_gated_equivariant_mlp(
         )
     )
     # put all layers together to make the network
-    out_net = nn.Sequential(*layers)
-    return out_net
+    return nn.Sequential(*layers)

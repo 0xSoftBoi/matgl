@@ -84,5 +84,4 @@ class AtomRef(nn.Module):
         property_offset_batched = self.property_offset.repeat(g.num_nodes, 1).to(one_hot.device)
         offset = property_offset_batched * one_hot
         atomic_offset = torch.sum(offset, dim=1)
-        offset_batched = global_add_pool(atomic_offset, g.batch)
-        return offset_batched
+        return global_add_pool(atomic_offset, g.batch)

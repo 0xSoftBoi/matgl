@@ -25,6 +25,7 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Warp kernels for TensorNet message passing (forward, backward, double-backward)."""
 
 import warp as wp
 
@@ -32,6 +33,7 @@ from .utils import add_module, get_wp_fp_dtype
 
 
 def generate_message_passing(dtype: str):
+    """Generate Warp kernels for TensorNet message passing at the given floating-point dtype."""
     dtype_wp = get_wp_fp_dtype(dtype)
 
     class vec3(wp.types.vector(length=3, dtype=dtype_wp)):

@@ -68,5 +68,4 @@ class BondExpansion(nn.Module):
         Returns:
             bond_basis: Radial basis functions
         """
-        bond_basis = self.rbf(bond_dist)
-        return bond_basis
+        return self.rbf(bond_dist)

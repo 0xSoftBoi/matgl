@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import Dropout, Identity, Module
 
 from matgl.layers._core import MLP, GatedMLP
@@ -138,9 +137,7 @@ class TensorNetInteraction(nn.Module):
 
         # Compute update
         dX = scalars + skew_metrices + traceless_tensors
-        X = X + dX + torch.matmul(dX, dX)
-
-        return X
+        return X + dX + torch.matmul(dX, dX)
 
     def message(
         self,

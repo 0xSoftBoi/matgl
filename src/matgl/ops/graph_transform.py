@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch wrappers around Warp graph-transform kernels (edge index to CSR conversion)."""
+
 from __future__ import annotations
 
 import torch
@@ -139,6 +141,7 @@ def _(
 
 @torch.compiler.allow_in_graph
 def graph_transform(edge_index: Tensor, num_nodes: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Convert an edge index to CSR row/column indptr, indices, and data tensors."""
     row_count, col_count = torch.ops.nvtnet.count_row_col_primitive(edge_index, num_nodes)
     row_indptr, col_indptr = (
         torch.cumsum(row_count, dim=0, dtype=torch.int32),

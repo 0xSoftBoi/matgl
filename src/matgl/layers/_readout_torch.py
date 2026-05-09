@@ -29,7 +29,8 @@ class WeightedAtomReadOut(nn.Module):
     """
 
     def __init__(self, in_feats: int, dims: Sequence[int], activation: nn.Module):
-        """
+        """Initialize the readout module.
+
         Args:
             in_feats: Input node feature dimension.
             dims: NN architecture for the MLP. The final entry is the output dimension.
@@ -97,14 +98,12 @@ class WeightedAtomReadOut(nn.Module):
         factor = weights / weight_sum[batch].clamp(min=1e-8)  # [num_nodes, 1]
 
         # sum_i factor_i * updated_field_i
-        out = scatter_add(
+        return scatter_add(
             factor * updated_field,
             batch,
             dim_size=num_graphs,
             dim=0,
         )  # [num_graphs, output_dim]
-
-        return out
 
 
 class ReduceReadOut(nn.Module):
@@ -137,13 +136,12 @@ class ReduceReadOut(nn.Module):
                     dtype=node_feat.dtype,
                 )
                 out.index_reduce_(0, batch.to(torch.long), node_feat, "amax", include_self=False)
-        else:
-            if self.op == "sum":
-                out = node_feat.sum(dim=0, keepdim=True)
-            elif self.op == "mean":
-                out = node_feat.mean(dim=0, keepdim=True)
-            else:  # max
-                out = node_feat.max(dim=0, keepdim=True)[0]
+        elif self.op == "sum":
+            out = node_feat.sum(dim=0, keepdim=True)
+        elif self.op == "mean":
+            out = node_feat.mean(dim=0, keepdim=True)
+        else:  # max
+            out = node_feat.max(dim=0, keepdim=True)[0]
 
         return out
 

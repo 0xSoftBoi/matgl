@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.nn import LSTM
 from torch_geometric.nn import global_add_pool, global_max_pool, global_mean_pool
 from torch_geometric.nn.aggr import Set2Set as PyGSet2Set
@@ -84,8 +84,7 @@ class WeightedReadOut(nn.Module):
             atomic_properties (torch.Tensor): Per-node atomic properties.
                 Shape: (num_nodes, num_targets).
         """
-        atomic_properties = self.gated(node_feat)
-        return atomic_properties
+        return self.gated(node_feat)
 
 
 class WeightedAtomReadOut(nn.Module):
@@ -165,9 +164,7 @@ class WeightedAtomReadOut(nn.Module):
         factor = weights / weight_sum[batch].clamp(min=1e-8)  # [num_nodes, 1]
 
         # sum_i factor_i * updated_field_i
-        h_g_sum = global_add_pool(factor * updated_field, batch)
-
-        return h_g_sum
+        return global_add_pool(factor * updated_field, batch)
 
 
 class Set2SetReadOut(PyGSet2Set):

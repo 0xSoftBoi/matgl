@@ -42,14 +42,13 @@ def generate_sh_to_rsh(lmax: int) -> torch.Tensor:
     l2 = lidx[None, :]
     m1 = midx[:, None]
     m2 = midx[None, :]
-    U = (
+    return (
         1.0 * ((m1 == 0) * (m2 == 0))
         + (-1.0) ** abs(m1) / math.sqrt(2) * ((m1 == m2) * (m1 > 0))
         + 1.0 / math.sqrt(2) * ((m1 == -m2) * (m2 < 0))
         + -1.0j * (-1.0) ** abs(m1) / math.sqrt(2) * ((m1 == -m2) * (m1 < 0))
         + 1.0j / math.sqrt(2) * ((m1 == m2) * (m1 < 0))
     ) * (l1 == l2)
-    return U
 
 
 @lru_cache(maxsize=10)
@@ -107,8 +106,7 @@ def generate_clebsch_gordan_rsh(lmax: int, parity_invariance: bool = True) -> to
         cg_rsh *= 1.0j**lsum
 
     # cast to real
-    cg_rsh = cg_rsh.real.to(matgl.float_th)
-    return cg_rsh
+    return cg_rsh.real.to(matgl.float_th)
 
 
 def sparsify_clebsch_gordon(

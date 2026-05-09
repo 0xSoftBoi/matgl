@@ -25,6 +25,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""Torch custom op wrappers for the Frobenius norm of a 3x3 tensor."""
+
 from __future__ import annotations
 
 import torch
@@ -155,11 +157,13 @@ def _(
 
 
 def tensor_norm3_fwd_setup_context(ctx, inputs, output):
+    """Save inputs for the tensor_norm3 forward autograd context."""
     (x,) = inputs
     ctx.save_for_backward(x)
 
 
 def tensor_norm3_bwd_setup_context(ctx, inputs, output):
+    """Save inputs for the tensor_norm3 backward autograd context."""
     (grad_output, x) = inputs
     ctx.save_for_backward(grad_output, x)
 
@@ -204,4 +208,5 @@ torch.library.register_autograd(
 
 
 def fn_tensor_norm3(x: Tensor) -> Tensor:
+    """Compute the per-component (I, A, S) Frobenius norms of a batched 3x3 tensor."""
     return torch.ops.tensornet.tensor_norm3_fwd_primitive(x)

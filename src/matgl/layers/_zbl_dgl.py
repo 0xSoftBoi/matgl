@@ -5,9 +5,9 @@ from __future__ import annotations
 import dgl
 import dgl.function as fn
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from ase.data import atomic_numbers
+from torch import nn
 
 import matgl
 from matgl.layers._activations import softplus_inverse

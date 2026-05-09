@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 
 import matgl
 from matgl.config import COULOMB_CONSTANT
