@@ -218,28 +218,28 @@ In the PES training, the unit of energies, forces and stresses (optional) in the
 
 Note: For stresses, we use the convention that compressive stress gives negative values. Stresses obtained from VASP calculations (default unit is kBar) should be multiplied by -0.1 to work directly with the model.
 
-### `MatGLPotentialTrainer`
+### `MGLPotentialTrainer`
 
-`matgl.utils.training.MatGLPotentialTrainer` is a high-level wrapper around `PotentialLightningModule` and `pl.Trainer` with sensible MatPES-tuned defaults (Huber loss, stress weight 0.1, Adam + CosineAnnealingLR). Dataset construction is delegated to static helpers; the trainer only consumes pre-built `MGLDataset`s.
+`matgl.utils.training.MGLPotentialTrainer` is a high-level wrapper around `PotentialLightningModule` and `pl.Trainer` with sensible MatPES-tuned defaults (Huber loss, stress weight 0.1, Adam + CosineAnnealingLR). Dataset construction is delegated to a sibling `MGLDatasetLoader` factory; the trainer itself only consumes pre-built `MGLDataset`s.
 
 #### Train a TensorNet on MatPES
 
 ```python
 from matgl.models import TensorNet
-from matgl.utils.training import MatGLPotentialTrainer
+from matgl.utils.training import MGLDatasetLoader, MGLPotentialTrainer
 
 # 1. Download the r2SCAN MatPES dataset + per-element isolated-atom offsets
-#    from materialyze/matpes on Hugging Face.
-ds = MatGLPotentialTrainer.load_matpes_dataset(version="r2SCAN-2025.2")
-refs = MatGLPotentialTrainer.load_matpes_element_refs(
-    version="r2SCAN-2025.2", element_types=ds.element_types
-)
+#    from materialyze/matpes on Hugging Face. One loader holds the shared HF
+#    auth / cache config; both calls go through it.
+loader = MGLDatasetLoader()
+ds = loader.matpes_dataset(version="r2SCAN-2025.2")
+refs = loader.matpes_element_refs(version="r2SCAN-2025.2", element_types=ds.element_types)
 
 # 2. Build the model on the same element_types as the dataset.
 model = TensorNet(element_types=ds.element_types, is_intensive=False, cutoff=5.0)
 
 # 3. Configure once, fit when asked.
-trainer = MatGLPotentialTrainer(
+trainer = MGLPotentialTrainer(
     model,
     energy_weight=1.0,
     force_weight=1.0,
@@ -251,26 +251,19 @@ trainer = MatGLPotentialTrainer(
     devices=1,
 )
 potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet")
-# trainer.potential / .lit_module / .trainer / .loaders are populated for inspection.
+# trainer.potential / .lit_module / .trainer / .loaders / .dataset / .atomrefs
+# are populated for inspection.
 ```
 
-For a non-MatPES extxyz dataset (e.g. `materialyze/mlip-lr-benchmarks` `cp_dimer.tar.gz`) just swap the loader.
-Cluster / dimer files have no stress, so the trainer auto-disables `stress_weight` for that fit with a one-line warning:
-
-```python
-ds = MatGLPotentialTrainer.load_extxyz_dataset(
-    repo_id="materialyze/mlip-lr-benchmarks", filename="cp_dimer.tar.gz"
-)
-trainer.fit(dataset=ds)   # stress_weight=0.1 -> 0 automatically; forces-only training
-```
+`MGLDatasetLoader()` defaults to the `materialyze/matpes` HF dataset repo; override `repo_id` / `revision` / `token` / `cache_dir` in the constructor to point at a fork or a private mirror.
 
 #### Fine-tune a pre-trained `TensorNet-PES-MatPES-r2SCAN-2025.2`
 
-`matgl.load_model(...)` returns a `Potential` whose inner graph model is `potential.model`. Pass that inner model into `MatGLPotentialTrainer` to keep the pretrained weights as the initialisation; pair it with a low learning rate, fewer epochs, and (often) zero or reduced stress weight if the fine-tuning dataset doesn't carry stresses.
+`matgl.load_model(...)` returns a `Potential` whose inner graph model is `potential.model`. Pass that inner model into `MGLPotentialTrainer` to keep the pretrained weights as the initialisation; pair it with a low learning rate, fewer epochs, and (often) zero or reduced stress weight if the fine-tuning dataset doesn't carry stresses.
 
 ```python
 import matgl
-from matgl.utils.training import MatGLPotentialTrainer
+from matgl.utils.training import MGLDatasetLoader, MGLPotentialTrainer
 
 # 1. Load the foundation potential and extract the inner graph model.
 pretrained = matgl.load_model("materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2")
@@ -278,40 +271,31 @@ model = pretrained.model            # the bare TensorNet — pretrained weights 
 print("element_types:", model.element_types)
 print("cutoff:", model.cutoff)
 
-# 2. Build / load the fine-tuning dataset. Use any of the static loaders, or
+# 2. Build / load the fine-tuning dataset. Use MGLDatasetLoader for MatPES, or
 #    construct an MGLDataset yourself from your own structures + labels.
-ds = MatGLPotentialTrainer.load_extxyz_dataset(path="./my_finetune_data.tar.gz")
-# The pretrained model expects MatPES element ordering. If your custom dataset
-# was built with a narrower element_types tuple, rebuild it against the model's:
-# ds = MatGLPotentialTrainer.load_extxyz_dataset(
-#     path=..., element_types=model.element_types
-# )
+loader = MGLDatasetLoader()
+ds = loader.matpes_dataset(version="r2SCAN-2025.2", element_types=model.element_types)
 
 # 3. Reuse the MatPES atomic references so the loss starts in the right energy
 #    range. Reorder them to the model's element_types.
-refs = MatGLPotentialTrainer.load_matpes_element_refs(
-    version="r2SCAN-2025.2", element_types=model.element_types
-)
+refs = loader.matpes_element_refs(version="r2SCAN-2025.2", element_types=model.element_types)
 
 # 4. Fine-tune with a low LR and short schedule. inference_mode is set to False
-#    automatically by MatGLPotentialTrainer (autograd-driven force / stress).
-trainer = MatGLPotentialTrainer(
+#    automatically by MGLPotentialTrainer (autograd-driven force / stress).
+trainer = MGLPotentialTrainer(
     model,
     energy_weight=1.0,
     force_weight=10.0,          # bump force weight; energies are already in scale
-    stress_weight=0.0,          # no stress in the fine-tune set
+    stress_weight=0.0,          # set to 0 if your fine-tune set has no stress
     lr=1e-4,                    # one to two orders of magnitude lower than from-scratch
     decay_steps=200,
     max_epochs=50,
     accelerator="gpu",
 )
 finetuned = trainer.fit(dataset=ds, atomrefs=refs, save_path="./TensorNet-finetuned")
-
-# Optional: publish to the Hub.
-# trainer.push_to_hub("your-org/TensorNet-finetuned")
 ```
 
-The same pattern works for any pretrained `Potential` from the [`materialyze`](https://huggingface.co/materialyze) HF organisation — extract `pretrained.model`, hand it to `MatGLPotentialTrainer`, and `fit`.
+The same pattern works for any pretrained `Potential` from the [`materialyze`](https://huggingface.co/materialyze) HF organisation — extract `pretrained.model`, hand it to `MGLPotentialTrainer`, and `fit`. For datasets without stress labels (e.g. cluster / dimer extxyz), set `stress_weight=0` in the trainer constructor so the stress term is dropped from the loss.
 
 ## Tutorials
 
