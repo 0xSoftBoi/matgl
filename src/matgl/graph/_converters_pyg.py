@@ -71,7 +71,13 @@ class GraphConverter(metaclass=abc.ABCMeta):
         pbc_offset = torch.as_tensor(images, dtype=matgl.float_th, device=device)
         graph.pbc_offset = pbc_offset  # Store as edge_attr instead of separate pbc_offset
 
-        # Convert lattice matrix to tensor
+        # Convert lattice matrix to tensor. Callers occasionally pass a list of
+        # numpy arrays (e.g. ``[lattice_matrix]`` for a single periodic cell);
+        # routing those through ``np.asarray`` first avoids the
+        # "Creating a tensor from a list of numpy.ndarrays is extremely slow"
+        # warning from ``torch.as_tensor``.
+        if not isinstance(lattice_matrix, torch.Tensor):
+            lattice_matrix = np.asarray(lattice_matrix)
         lattice = torch.as_tensor(lattice_matrix, dtype=matgl.float_th, device=device)
 
         # Create node features (node_type based on element indices). Use a dict
