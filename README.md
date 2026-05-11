@@ -87,13 +87,13 @@ Here, we summarize the currently implemented architectures in MatGL. It should b
 an exhaustive list, and we expect new architectures to be added by the core MatGL team as well as other contributors
 in the future.
 
-- [QET] (DGL only, PYG coming soon), pronounced as "ket", is a charge-equilibrated TensorNet architecture. It is an
+- [QET], pronounced as "ket", is a charge-equilibrated TensorNet architecture. It is an
   equivariant, charge-aware architecture that attains linear scaling with system size via an analytically solvable
   charge-equilibration scheme. A pre-trained QET-MatQ FP is available, which matches state-of-the-art FPs on standard
   materials property benchmarks but delivers qualitatively different predictions in systems dominated by charge
   transfer, e.g., NaCl–\ce{CaCl2} ionic liquid, reactive processes at the Li/\ce{Li6PS5Cl} solid-electrolyte interface,
   and supports simulations under applied electrochemical potentials.
-- [TensorNet] (PYG and DGL) is an O(3)-equivariant message-passing neural network architecture that leverages Cartesian tensor
+- [TensorNet] is an O(3)-equivariant message-passing neural network architecture that leverages Cartesian tensor
   representations. It is a generalization of the [SO3Net] architecture, which is a minimalist SO(3)-equivariant neural
   network. In general, TensorNet has been shown to be much more data and parameter efficient than other equivariant
   architectures. It is currently the default architecture used in the [Materials Virtual Lab].
@@ -104,14 +104,15 @@ in the future.
 - [Materials 3-body Graph Network (M3GNet)][m3gnet] is an invariant graph neural network architecture that
   incorporates 3-body interactions. An additional difference is the addition of the coordinates for atoms and
   the 3×3 lattice matrix in crystals, which are necessary for obtaining tensorial quantities such as forces and
-  stresses via auto-differentiation. As a framework, M3GNet has diverse applications, including **Interatomic potential development.** With the same training data, M3GNet performs similarly to state-of-the-art
+  stresses via auto-differentiation. As a framework, M3GNet has diverse applications, including **Interatomic potential development.**
+  With the same training data, M3GNet performs similarly to state-of-the-art
   machine learning interatomic potentials (MLIPs). However, a key feature of a graph representation is its
   flexibility to scale to diverse chemical spaces. One of the key accomplishments of M3GNet is the development of a
   [*foundation potential*][m3gnet] that can work across the entire periodic table of the elements by training on
   relaxations performed in the [Materials Project][mp]. Like the previous MEGNet architecture, M3GNet can be used to
   develop surrogate models for property predictions, achieving in many cases accuracies that are better or similar to
   other state-of-the-art ML models.
-- [MatErials Graph Network (MEGNet)][megnet] (DGL only) is an implementation of DeepMind's [graph networks][graphnetwork] for
+- [MatErials Graph Network (MEGNet)][megnet] is an implementation of DeepMind's [graph networks][graphnetwork] for
   machine learning in materials science. We have demonstrated its success in achieving low prediction errors in a broad
   array of properties in both [molecules and crystals][megnet]. New releases have included our recent work on
   [multi-fidelity materials property modeling][mfimegnet]. Figure 1 shows the sequential update steps of the graph
@@ -122,29 +123,10 @@ For detailed performance benchmarks, please refer to the publications in the [Re
 
 ## Installation
 
-Matgl can be installed via pip:
+MatGL can be installed via pip:
 
 ```bash
 pip install matgl
-```
-
-If you need to use DGL, it is recommended you install the latest version of DGL before installing matgl.
-
-```bash
-pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/repo.html
-```
-
-### CUDA (GPU) installation
-
-If you intend to use CUDA (GPU) to speed up training, it is important to install the appropriate versions of PyTorch
-and DGL. The basic instructions are given below, but it is recommended that you consult the
-[PyTorch docs](https://pytorch.org/get-started/locally/) and [DGL docs](https://www.dgl.ai/pages/start.html) if you
-run into any problems.
-
-```shell
-pip install torch==2.2.0 --index-url https://download.pytorch.org/whl/cu121
-pip install dgl -f https://data.dgl.ai/wheels/cu121/repo.html
-pip install dglgo -f https://data.dgl.ai/wheels-test/repo.html
 ```
 
 ## Docker images
@@ -171,7 +153,7 @@ as other simple administrative tasks (e.g., clearing the cache). Some simple exa
 2. To use one of the pre-trained property models,
 
     ```bash
-    mgl predict --model M3GNet-MP-2018.6.1-Eform --infile Li2O.cif
+    mgl predict --model M3GNet-Eform-MP-2018.6.1 --infile Li2O.cif
     ```
 
 3. To clear the cache,
@@ -196,14 +178,6 @@ import matgl
 model = matgl.load_model("materialyze/TensorNet-PES-MatPES-2025.2")
 ```
 
-Equivalently, any matgl model class exposes a `from_pretrained` classmethod:
-
-```python
-from matgl.models import M3GNet
-
-model = M3GNet.from_pretrained("materialyze/TensorNet-PES-MatPES-2025.2")
-```
-
 To publish a trained model to the Hugging Face Hub, use `push_to_hub` (requires `huggingface-cli login` or a `token`):
 
 ```python
@@ -220,13 +194,13 @@ print(list(hf.list_models(filter="matgl")))
 
 ### Model Usage
 
-he following is an example of a prediction of the formation energy for CsCl.
+The following is an example of a prediction of the formation energy for CsCl.
 
 ```python
 from pymatgen.core import Lattice, Structure
 import matgl
 
-model = matgl.load_model("MEGNet-MP-2018.6.1-Eform")
+model = matgl.load_model("MEGNet-Eform-MP-2018.6.1")
 
 # This is the structure obtained from the Materials Project.
 struct = Structure.from_spacegroup("Pm-3m", Lattice.cubic(4.1437), ["Cs", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
@@ -243,6 +217,101 @@ In the PES training, the unit of energies, forces and stresses (optional) in the
 - stresses: a list of 3x3 stress matrices with unit GPa (optional)
 
 Note: For stresses, we use the convention that compressive stress gives negative values. Stresses obtained from VASP calculations (default unit is kBar) should be multiplied by -0.1 to work directly with the model.
+
+### `MatGLPotentialTrainer`
+
+`matgl.utils.training.MatGLPotentialTrainer` is a high-level wrapper around `PotentialLightningModule` and `pl.Trainer` with sensible MatPES-tuned defaults (Huber loss, stress weight 0.1, Adam + CosineAnnealingLR). Dataset construction is delegated to static helpers; the trainer only consumes pre-built `MGLDataset`s.
+
+#### Train a TensorNet on MatPES
+
+```python
+from matgl.models import TensorNet
+from matgl.utils.training import MatGLPotentialTrainer
+
+# 1. Download the r2SCAN MatPES dataset + per-element isolated-atom offsets
+#    from materialyze/matpes on Hugging Face.
+ds = MatGLPotentialTrainer.load_matpes_dataset(version="r2SCAN-2025.2")
+refs = MatGLPotentialTrainer.load_matpes_element_refs(
+    version="r2SCAN-2025.2", element_types=ds.element_types
+)
+
+# 2. Build the model on the same element_types as the dataset.
+model = TensorNet(element_types=ds.element_types, is_intensive=False, cutoff=5.0)
+
+# 3. Configure once, fit when asked.
+trainer = MatGLPotentialTrainer(
+    model,
+    energy_weight=1.0,
+    force_weight=1.0,
+    stress_weight=0.1,
+    lr=1e-3,
+    batch_size=32,
+    max_epochs=200,
+    accelerator="gpu",          # "auto" / "cpu" / "gpu" / "cuda" / "mps" / "tpu"
+    devices=1,
+)
+potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet")
+# trainer.potential / .lit_module / .trainer / .loaders are populated for inspection.
+```
+
+For a non-MatPES extxyz dataset (e.g. `materialyze/mlip-lr-benchmarks` `cp_dimer.tar.gz`) just swap the loader.
+Cluster / dimer files have no stress, so the trainer auto-disables `stress_weight` for that fit with a one-line warning:
+
+```python
+ds = MatGLPotentialTrainer.load_extxyz_dataset(
+    repo_id="materialyze/mlip-lr-benchmarks", filename="cp_dimer.tar.gz"
+)
+trainer.fit(dataset=ds)   # stress_weight=0.1 -> 0 automatically; forces-only training
+```
+
+#### Fine-tune a pre-trained `TensorNet-PES-MatPES-r2SCAN-2025.2`
+
+`matgl.load_model(...)` returns a `Potential` whose inner graph model is `potential.model`. Pass that inner model into `MatGLPotentialTrainer` to keep the pretrained weights as the initialisation; pair it with a low learning rate, fewer epochs, and (often) zero or reduced stress weight if the fine-tuning dataset doesn't carry stresses.
+
+```python
+import matgl
+from matgl.utils.training import MatGLPotentialTrainer
+
+# 1. Load the foundation potential and extract the inner graph model.
+pretrained = matgl.load_model("materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2")
+model = pretrained.model            # the bare TensorNet — pretrained weights intact
+print("element_types:", model.element_types)
+print("cutoff:", model.cutoff)
+
+# 2. Build / load the fine-tuning dataset. Use any of the static loaders, or
+#    construct an MGLDataset yourself from your own structures + labels.
+ds = MatGLPotentialTrainer.load_extxyz_dataset(path="./my_finetune_data.tar.gz")
+# The pretrained model expects MatPES element ordering. If your custom dataset
+# was built with a narrower element_types tuple, rebuild it against the model's:
+# ds = MatGLPotentialTrainer.load_extxyz_dataset(
+#     path=..., element_types=model.element_types
+# )
+
+# 3. Reuse the MatPES atomic references so the loss starts in the right energy
+#    range. Reorder them to the model's element_types.
+refs = MatGLPotentialTrainer.load_matpes_element_refs(
+    version="r2SCAN-2025.2", element_types=model.element_types
+)
+
+# 4. Fine-tune with a low LR and short schedule. inference_mode is set to False
+#    automatically by MatGLPotentialTrainer (autograd-driven force / stress).
+trainer = MatGLPotentialTrainer(
+    model,
+    energy_weight=1.0,
+    force_weight=10.0,          # bump force weight; energies are already in scale
+    stress_weight=0.0,          # no stress in the fine-tune set
+    lr=1e-4,                    # one to two orders of magnitude lower than from-scratch
+    decay_steps=200,
+    max_epochs=50,
+    accelerator="gpu",
+)
+finetuned = trainer.fit(dataset=ds, atomrefs=refs, save_path="./TensorNet-finetuned")
+
+# Optional: publish to the Hub.
+# trainer.push_to_hub("your-org/TensorNet-finetuned")
+```
+
+The same pattern works for any pretrained `Potential` from the [`materialyze`](https://huggingface.co/materialyze) HF organisation — extract `pretrained.model`, hand it to `MatGLPotentialTrainer`, and `fit`.
 
 ## Tutorials
 
