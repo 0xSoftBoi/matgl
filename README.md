@@ -226,14 +226,14 @@ Note: For stresses, we use the convention that compressive stress gives negative
 
 ```python
 from matgl.models import TensorNet
-from matgl.utils.training import MGLDatasetLoader, MGLPotentialTrainer
+from matgl import MGLDatasetLoader, MGLPotentialTrainer
 
 # 1. Download the r2SCAN MatPES dataset + per-element isolated-atom offsets
 #    from materialyze/matpes on Hugging Face. One loader holds the shared HF
 #    auth / cache config; both calls go through it.
 loader = MGLDatasetLoader()
-ds = loader.matpes_dataset(version="r2SCAN-2025.2")
-refs = loader.matpes_element_refs(version="r2SCAN-2025.2", element_types=ds.element_types)
+ds = loader.matpes_dataset(version="R2SCAN-2025.2")
+refs = loader.matpes_element_refs(version="R2SCAN-2025.2", element_types=ds.element_types)
 
 # 2. Build the model on the same element_types as the dataset.
 model = TensorNet(element_types=ds.element_types, is_intensive=False, cutoff=5.0)
@@ -259,50 +259,27 @@ potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet
 
 #### Logging and callbacks
 
-`MGLPotentialTrainer` instantiates `pl.Trainer` inside `fit()` and forwards everything in `trainer_kwargs` verbatim, so any Lightning `logger` / `callbacks` setup works unchanged. The `PotentialLightningModule` logs `Total_Loss`, `Energy_MAE`, `Force_MAE`, `Stress_MAE` (plus `Magmom_MAE` / `Charge_MAE` when those heads are active) and the matching `*_RMSE` keys, each prefixed with `train_` / `val_` / `test_` — those are the names a checkpoint / early-stopping / logger sees.
+`MGLPotentialTrainer` instantiates `pl.Trainer` inside `fit()` and forwards everything in `trainer_kwargs` verbatim, so any Lightning `logger` / `callbacks` setup works unchanged. The `PotentialLightningModule` logs `Total_Loss`, `Energy_MAE`, `Force_MAE`, `Stress_MAE` (plus `Magmom_MAE` / `Charge_MAE` when those heads are active) and the matching `*_RMSE` keys, each prefixed with `train_` / `val_` / `test_` — those are the names a checkpoint / early-stopping / logger sees. For per-epoch dumps of every prediction / label / error in stable sample order, matgl ships `matgl.utils.callbacks.PredictionLogger`.
 
-```python
-from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import CSVLogger
-
-trainer = MGLPotentialTrainer(
-    model,
-    accelerator="gpu",
-    trainer_kwargs={
-        "logger": CSVLogger(save_dir="./logs", name="matpes-tensornet"),
-        "callbacks": [
-            LearningRateMonitor(logging_interval="epoch"),
-            ModelCheckpoint(dirpath="./logs/ckpts", monitor="val_Total_Loss", mode="min", save_top_k=3),
-            EarlyStopping(monitor="val_Total_Loss", patience=20, mode="min"),
-        ],
-    },
-)
-```
-
-Swap `CSVLogger` for `TensorBoardLogger` / `WandbLogger` / `MLFlowLogger` (or pass a list for multi-sink logging). For per-epoch dumps of every prediction / label / error in stable sample order, matgl ships `matgl.utils.callbacks.PredictionLogger` — stamp the split(s) you want logged with `matgl.utils.callbacks.add_sample_indices` before calling `fit`. For one-off instrumentation, drop a `pl.Callback` subclass into `callbacks`; `PotentialLightningModule.training_step` / `validation_step` return `{"loss", "preds", "labels", "indices", "num_atoms"}` as `outputs` so you can log any derived metric (per-step force RMS, energy residual histograms, etc.) without touching the model.
-
-#### Fine-tune a pre-trained `TensorNet-PES-MatPES-r2SCAN-2025.2`
+#### Fine-tune a pre-trained potential
 
 `matgl.load_model(...)` returns a `Potential` whose inner graph model is `potential.model`. Pass that inner model into `MGLPotentialTrainer` to keep the pretrained weights as the initialisation; pair it with a low learning rate, fewer epochs, and (often) zero or reduced stress weight if the fine-tuning dataset doesn't carry stresses.
 
 ```python
-import matgl
-from matgl.utils.training import MGLDatasetLoader, MGLPotentialTrainer
+from matgl import load_model, MGLDatasetLoader, MGLPotentialTrainer
 
 # 1. Load the foundation potential and extract the inner graph model.
-pretrained = matgl.load_model("materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2")
+pretrained = load_model("materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2")
 model = pretrained.model            # the bare TensorNet — pretrained weights intact
-print("element_types:", model.element_types)
-print("cutoff:", model.cutoff)
 
 # 2. Build / load the fine-tuning dataset. Use MGLDatasetLoader for MatPES, or
 #    construct an MGLDataset yourself from your own structures + labels.
 loader = MGLDatasetLoader()
-ds = loader.matpes_dataset(version="r2SCAN-2025.2", element_types=model.element_types)
+ds = loader.matpes_dataset(version="R2SCAN-2025.2", element_types=model.element_types)
 
 # 3. Reuse the MatPES atomic references so the loss starts in the right energy
 #    range. Reorder them to the model's element_types.
-refs = loader.matpes_element_refs(version="r2SCAN-2025.2", element_types=model.element_types)
+refs = loader.matpes_element_refs(version="R2SCAN-2025.2", element_types=model.element_types)
 
 # 4. Fine-tune with a low LR and short schedule. inference_mode is set to False
 #    automatically by MGLPotentialTrainer (autograd-driven force / stress).
