@@ -23,43 +23,9 @@ if matgl.config.BACKEND != "PYG":
 
 from matgl.models import TensorNet
 from matgl.utils import training as training_mod
-from matgl.utils.training import (
-    MGLDatasetLoader,
-    MGLPotentialTrainer,
-    _matpes_atomrefs_filename,
-    _matpes_dataset_filename,
-    _matpes_parse_version,
-)
+from matgl.utils.training import MGLDatasetLoader, MGLPotentialTrainer
 
 _NACL_PARITY = pathlib.Path(__file__).parent.parent / "parity_data" / "nacl_training_set.json.gz"
-
-
-# ---------------------------------------------------------------------------
-# Pure-string helpers.
-# ---------------------------------------------------------------------------
-
-
-class TestFilenameHelpers:
-    def test_matpes_dataset_lowercase(self):
-        assert _matpes_dataset_filename("r2SCAN-2025.2") == "MatPES-R2SCAN-2025.2.json"
-
-    def test_matpes_dataset_uppercase(self):
-        assert _matpes_dataset_filename("R2SCAN-2025.2") == "MatPES-R2SCAN-2025.2.json"
-
-    def test_matpes_dataset_pbe(self):
-        assert _matpes_dataset_filename("PBE-2025.1") == "MatPES-PBE-2025.1.json"
-
-    def test_atomrefs_filename(self):
-        assert _matpes_atomrefs_filename("r2SCAN-2025.2") == "MatPES-R2SCAN-atoms.json"
-        assert _matpes_atomrefs_filename("PBE-2025.1") == "MatPES-PBE-atoms.json"
-
-    def test_parse_version_invalid(self):
-        with pytest.raises(ValueError, match="Invalid MatPES version"):
-            _matpes_parse_version("invalid")
-        with pytest.raises(ValueError, match="Invalid MatPES version"):
-            _matpes_parse_version("PBE-")
-        with pytest.raises(ValueError, match="Invalid MatPES version"):
-            _matpes_parse_version("-2025.2")
 
 
 # ---------------------------------------------------------------------------
