@@ -30,6 +30,12 @@ float_th = torch.float32
 int_np = np.int32
 int_th = torch.int32
 
+# Training entry points re-exported at the top level for convenience.
+# Imported after the dtype defs above because the training module pulls in
+# submodules that read ``matgl.float_th`` at import time, which would otherwise
+# trip a circular import.
+from .utils.training import MGLDatasetLoader, MGLPotentialTrainer  # noqa: E402
+
 
 def set_default_dtype(type_: str = "float", size: int = 32) -> None:
     """Set the default dtype size (16, 32 or 64) for int or float used throughout matgl.
