@@ -232,6 +232,143 @@ class TestLoadMatpesDataset:
 
 
 # ---------------------------------------------------------------------------
+# MatPES dataset loader — local-file entry point (no HF traffic).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _NACL_PARITY.exists(), reason="NaCl parity payload missing")
+class TestLoadMatpesDatasetFromJson:
+    def test_classmethod_call_without_instantiation(self, tmp_path):
+        """``from_json`` is a ``@staticmethod`` — callable on the class with no loader instance."""
+        flat = _flat_parity_payload_path(tmp_path)
+        ds = MGLDatasetLoader.from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+        )
+        assert set(ds.labels.keys()) == {"energies", "forces", "stresses"}
+        assert len(ds) == len(ds.labels["energies"])
+
+    def test_loads_from_local_path_without_hf_calls(self, monkeypatch, tmp_path):
+        """``from_json`` reads the JSON directly; HF helpers stay untouched."""
+
+        def fail_hf(**kwargs):
+            raise AssertionError("hf_hub_download must not be called for a local-file load")
+
+        def fail_cache(**kwargs):
+            raise AssertionError("try_to_load_from_cache must not be called for a local-file load")
+
+        monkeypatch.setattr(training_mod, "hf_hub_download", fail_hf)
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", fail_cache)
+
+        flat = _flat_parity_payload_path(tmp_path)
+        ds = MGLDatasetLoader().from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+        )
+
+        assert set(ds.labels.keys()) == {"energies", "forces", "stresses"}
+        assert len(ds) == len(ds.labels["energies"])
+        assert set(ds.element_types) == {"Na", "Cl"}
+
+    def test_matches_hf_path_for_same_payload(self, monkeypatch, tmp_path):
+        """The HF and local entry points produce identical labels for the same JSON bytes."""
+        flat = _flat_parity_payload_path(tmp_path)
+
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **kwargs: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **kwargs: None)
+
+        ds_hf = MGLDatasetLoader().matpes_dataset(
+            version="r2SCAN-2025.2",
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds_hf"),
+            stress_unit="GPa",
+        )
+        ds_file = MGLDatasetLoader().from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds_file"),
+            stress_unit="GPa",
+        )
+
+        assert len(ds_hf) == len(ds_file)
+        np.testing.assert_allclose(
+            np.asarray(ds_hf.labels["energies"]),
+            np.asarray(ds_file.labels["energies"]),
+        )
+        np.testing.assert_allclose(
+            np.asarray(ds_hf.labels["stresses"]),
+            np.asarray(ds_file.labels["stresses"]),
+        )
+
+    def test_stress_unit_kbar_scales_to_gpa_with_sign_flip(self, tmp_path):
+        """Same kbar → matgl-GPa convention as the HF path."""
+        flat = _flat_parity_payload_path(tmp_path)
+        ds_gpa = MGLDatasetLoader().from_json(
+            flat, cutoff=4.0, save_cache=False, root=str(tmp_path / "g"), stress_unit="GPa"
+        )
+        ds_kbar = MGLDatasetLoader().from_json(flat, cutoff=4.0, save_cache=False, root=str(tmp_path / "k"))
+        np.testing.assert_allclose(
+            np.asarray(ds_kbar.labels["stresses"], dtype="float64"),
+            np.asarray(ds_gpa.labels["stresses"], dtype="float64") * -0.1,
+            rtol=1e-12,
+            atol=0.0,
+        )
+
+    def test_batch_size_returns_dataloader_triple(self, tmp_path):
+        """Passing ``batch_size`` splits the dataset and returns (train, val, test) loaders."""
+        from torch.utils.data import DataLoader
+
+        flat = _flat_parity_payload_path(tmp_path)
+        loaders = MGLDatasetLoader().from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+            batch_size=2,
+            split=(0.6, 0.2, 0.2),
+            num_workers=0,
+            random_state=7,
+        )
+        assert isinstance(loaders, tuple)
+        assert len(loaders) == 3
+        train_loader, val_loader, test_loader = loaders
+        assert all(isinstance(loader, DataLoader) for loader in (train_loader, val_loader, test_loader))
+        # Every loader must produce at least one batch with the requested
+        # batch_size honoured (last batch may be smaller for non-divisible
+        # split sizes).
+        for loader in (train_loader, val_loader, test_loader):
+            batches = list(loader)
+            assert batches, "split fraction produced an empty loader"
+            assert batches[0][0].batch_size <= 2
+
+    def test_default_split_when_only_batch_size_given(self, tmp_path):
+        """Omitting ``split`` falls back to ``split_dataset``'s 80/10/10 default."""
+        flat = _flat_parity_payload_path(tmp_path)
+        train, val, test = MGLDatasetLoader().from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+            batch_size=4,
+            num_workers=0,
+        )
+        total = len(train.dataset) + len(val.dataset) + len(test.dataset)
+        # 80/10/10 split: train ≈ 0.8 * total (floor); the remainder lands in val/test.
+        assert len(train.dataset) == int(0.8 * total)
+        assert len(val.dataset) == int(0.1 * total)
+
+
+# ---------------------------------------------------------------------------
 # MatPES element-refs loader (monkeypatched HF).
 # ---------------------------------------------------------------------------
 

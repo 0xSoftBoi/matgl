@@ -10,7 +10,6 @@ so a small handful of methods branch on ``matgl.config.BACKEND``. Everything els
 from __future__ import annotations
 
 import math
-import re
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import lightning as pl
@@ -802,15 +801,6 @@ def xavier_init(model: nn.Module, gain: float = 1.0, distribution: Literal["unif
 
 HF_MATPES_REPO_ID = "materialyze/matpes"
 
-# Filename patterns that map to the (train, test, valid) trio inside an extxyz
-# tarball. We accept either ``-`` or ``_`` separators around the tag, and treat
-# ``val`` as a synonym for ``valid``.
-_EXTXYZ_SPLIT_PATTERNS: dict[str, re.Pattern[str]] = {
-    "train": re.compile(r"[-_]train\.(?:ext)?xyz$", re.IGNORECASE),
-    "test": re.compile(r"[-_]test\.(?:ext)?xyz$", re.IGNORECASE),
-    "valid": re.compile(r"[-_]val(?:id)?\.(?:ext)?xyz$", re.IGNORECASE),
-}
-
 # Stress-unit conversion to matgl's internal unit (**GPa**, compressive =
 # negative — see the "Model Training" section of the README). ``1 GPa = 10
 # kbar = 1/160.21766208 eV/Å³``. The ``"kbar"`` factor is ``-0.1``, which both
@@ -829,61 +819,6 @@ _STRESS_UNIT_TO_GPA: dict[str, float] = {
 }
 
 
-def _matpes_parse_version(version: str) -> tuple[str, str]:
-    """Split a MatPES version into ``(functional_upper, version_tag)``.
-
-    Examples:
-        ``"r2SCAN-2025.2"`` -> ``("R2SCAN", "2025.2")``
-        ``"PBE-2025.1"``    -> ``("PBE", "2025.1")``
-    """
-    if "-" not in version:
-        raise ValueError(
-            f"Invalid MatPES version {version!r}: expected '<functional>-<tag>' (e.g. 'r2SCAN-2025.2', 'PBE-2025.2')."
-        )
-    functional, _, tag = version.partition("-")
-    if not functional or not tag:
-        raise ValueError(f"Invalid MatPES version {version!r}: both functional and tag must be non-empty.")
-    return functional.upper(), tag
-
-
-def _matpes_dataset_filename(version: str) -> str:
-    """Return the on-disk MatPES filename for a given version (and optional split)."""
-    functional, tag = _matpes_parse_version(version)
-    return f"MatPES-{functional}-{tag}.json"
-
-
-def _matpes_atomrefs_filename(version: str) -> str:
-    """Return the MatPES atomrefs filename (functional-specific only)."""
-    functional, _ = _matpes_parse_version(version)
-    return f"MatPES-{functional}-atoms.json"
-
-
-def _matpes_samples_to_lists(
-    samples: Iterable[Mapping],
-    stress_unit: StressUnit = "kbar",
-) -> tuple[list[Structure], list[float], list, list]:
-    """Walk a MatPES sample list and return parallel (structures, energies, forces, stresses) lists."""
-    structures: list[Structure] = []
-    energies: list[float] = []
-    forces: list = []
-    stresses: list = []
-    factor = _STRESS_UNIT_TO_GPA[stress_unit]
-
-    for raw in samples:
-        struct = raw["structure"]
-        if not isinstance(struct, Structure):
-            struct = Structure.from_dict(struct)
-        structures.append(struct)
-        energies.append(float(raw["energy"]))
-        forces.append(np.asarray(raw["forces"], dtype="float64").tolist())
-        stresses.append((np.asarray(raw["stress"], dtype="float64") * factor).tolist())
-    return structures, energies, forces, stresses
-
-
-def _resolve_cache_dir(cache_dir: str | Path | None) -> str:
-    return str(cache_dir) if cache_dir is not None else str(MATGL_CACHE)
-
-
 def _hf_download_cached_first(
     *,
     repo_id: str,
@@ -891,7 +826,7 @@ def _hf_download_cached_first(
     repo_type: str,
     revision: str | None,
     token: str | None,
-    cache_dir: str | Path | None,
+    cache_dir: str | Path | None = MATGL_CACHE,
 ) -> str:
     """Return the local path for an HF Hub file, using the cache when available.
 
@@ -901,12 +836,11 @@ def _hf_download_cached_first(
     cached snapshot path with no network access, so we use it as a fast path
     and only fall through to ``hf_hub_download`` on a miss.
     """
-    resolved = _resolve_cache_dir(cache_dir)
     cached = try_to_load_from_cache(
         repo_id=repo_id,
         filename=filename,
         repo_type=repo_type,
-        cache_dir=resolved,
+        cache_dir=cache_dir,
         revision=revision,
     )
     # ``cached`` is a path string when the file is in cache, ``None`` when not
@@ -920,7 +854,7 @@ def _hf_download_cached_first(
         repo_type=repo_type,
         revision=revision,
         token=token,
-        cache_dir=resolved,
+        cache_dir=cache_dir,
     )
 
 
@@ -954,37 +888,6 @@ def _build_pes_dataset(
     return dataset
 
 
-def _read_matpes_dataset_local(
-    local_path: str | Path,
-    *,
-    cutoff: float = 5.0,
-    element_types: tuple[str, ...] | None = None,
-    save_cache: bool = True,
-    root: str | None = None,
-    stress_unit: StressUnit = "kbar",
-) -> MGLDataset:
-    """Read a (locally cached) MatPES JSON file and build an ``MGLDataset``.
-
-    Stresses on disk are stored in **kbar** (raw VASP convention,
-    compressive = positive). They are converted to **GPa** with the
-    compressive-negative sign convention used throughout matgl — see the
-    "Model Training" section of the README — by multiplying by the
-    ``stress_unit`` factor (``-0.1`` for the default ``"kbar"``).
-    Pass ``stress_unit="GPa"`` if the file is already in matgl convention.
-    """
-    samples = loadfn(local_path)
-    structures, energies, forces, stresses = _matpes_samples_to_lists(samples, stress_unit=stress_unit)
-
-    return _build_pes_dataset(
-        structures,
-        {"energies": energies, "forces": forces, "stresses": stresses},
-        cutoff=cutoff,
-        element_types=element_types,
-        save_cache=save_cache,
-        root=root,
-    )
-
-
 class MGLDatasetLoader:
     """Factory for building :class:`MGLDataset` objects from external sources.
 
@@ -1004,6 +907,29 @@ class MGLDatasetLoader:
             repo_id="my-org/matpes-fork", token="hf_...", revision="dev"
         )
 
+    Already have a MatPES (or MatPES-shaped) JSON on disk? Skip the HF round
+    trip and load it directly. :meth:`from_json` is a ``@staticmethod`` — it
+    needs no loader state and can be called on the class itself::
+
+        ds = MGLDatasetLoader.from_json("/path/to/MatPES-r2SCAN-2025.2.json")
+
+    (The instance form ``loader.from_json(...)`` works too, for callers that
+    already hold a loader.)
+
+    Or fold the split + ``MGLDataLoader`` step into the same call by passing
+    a ``batch_size`` (optionally with custom ``split`` fractions / ``shuffle``
+    / ``random_state``)::
+
+        train, val, test = MGLDatasetLoader.from_json(
+            "/path/to/MatPES-r2SCAN-2025.2.json",
+            batch_size=32,
+            split=(0.8, 0.1, 0.1),
+        )
+
+    See :meth:`from_json` for the expected schema (the same one the live
+    MatPES JSONs ship in: ``structure`` + ``energy`` + ``forces`` + ``stress``
+    per record).
+
     This class only constructs datasets; training itself is handled by
     :class:`MGLPotentialTrainer`.
     """
@@ -1014,7 +940,7 @@ class MGLDatasetLoader:
         repo_id: str = HF_MATPES_REPO_ID,
         revision: str | None = None,
         token: str | None = None,
-        cache_dir: str | Path | None = None,
+        cache_dir: str | Path | None = MATGL_CACHE,
     ) -> None:
         """Initialise the loader with shared HF Hub config.
 
@@ -1034,7 +960,7 @@ class MGLDatasetLoader:
 
     def matpes_dataset(
         self,
-        version: str = "r2SCAN-2025.2",
+        version: str = "R2SCAN-2025.2",
         *,
         cutoff: float = 5.0,
         element_types: tuple[str, ...] | None = None,
@@ -1066,7 +992,8 @@ class MGLDatasetLoader:
             An ``MGLDataset`` ready to drop into ``MGLDataLoader``. The
             monolithic files are 1.6-2.4 GB.
         """
-        filename = _matpes_dataset_filename(version)
+        functional, tag = version.split("-")
+        filename = f"MatPES-{functional}-{tag}.json"
         local_path = _hf_download_cached_first(
             repo_id=repo_id or self.repo_id,
             filename=filename,
@@ -1075,18 +1002,152 @@ class MGLDatasetLoader:
             token=self.token,
             cache_dir=self.cache_dir,
         )
-        return _read_matpes_dataset_local(
-            local_path,
+        # ``from_json`` is a staticmethod and returns a Union; without
+        # ``batch_size`` it always gives back an ``MGLDataset``, but mypy
+        # can't narrow on the missing kwarg so cast explicitly to preserve
+        # this method's narrower signature.
+        return cast(
+            "MGLDataset",
+            MGLDatasetLoader.from_json(
+                local_path,
+                cutoff=cutoff,
+                element_types=element_types,
+                save_cache=save_cache,
+                root=root,
+                stress_unit=stress_unit,
+            ),
+        )
+
+    @staticmethod
+    def from_json(
+        path: str | Path,
+        *,
+        cutoff: float = 5.0,
+        element_types: tuple[str, ...] | None = None,
+        save_cache: bool = True,
+        root: str | None = None,
+        stress_unit: StressUnit = "kbar",
+        batch_size: int | None = None,
+        split: Sequence[float] | None = None,
+        shuffle: bool = True,
+        random_state: int = 42,
+        **loader_kwargs,
+    ) -> MGLDataset | tuple[DataLoader, ...]:
+        """Build an ``MGLDataset`` (or train/val/test ``DataLoader`` triple) from a local MatPES-shaped JSON file.
+
+        The file format mirrors the live MatPES JSON dataset exactly — a flat
+        JSON list of per-frame records, one record per (structure, PES data)
+        pair. Custom DFT runs and MatPES forks that respect this schema drop
+        in unchanged. No HF Hub round trip happens; this is the local-disk
+        sibling of :meth:`matpes_dataset`.
+
+        **Schema (per record)** — the important keys are:
+
+        - ``structure`` (**required**): a pymatgen ``Structure`` or its
+          MSONable ``as_dict()`` form — anything ``Structure.from_dict`` can
+          rebuild. Carries the atomic positions, lattice, and species.
+        - ``energy`` (**required**): total energy in **eV** as a scalar.
+        - ``forces`` (**required**): per-atom forces in **eV/Å**, shape
+          ``(N_atoms, 3)`` (list-of-lists is fine).
+        - ``stress`` (**required**): stress tensor as either a ``3x3`` or
+          length-6 (Voigt) array. Units are controlled by ``stress_unit``
+          below; the default matches MatPES on-disk convention.
+
+        Any extra keys in each record (e.g. ``functional``, ``bandgap``,
+        ``magmoms``, provenance metadata) are ignored — only the four PES
+        keys above are read.
+
+        Args:
+            path: Path to the JSON file. ``.json``, ``.json.gz``, and other
+                formats supported by ``monty.serialization.loadfn`` all work.
+            cutoff: Neighbour cutoff (Å) handed to ``Structure2Graph``.
+            element_types: Optional explicit ordering; auto-derived from the
+                structures when ``None``.
+            save_cache: Whether ``MGLDataset`` persists its processed cache.
+            root: ``MGLDataset`` root directory; default lets it pick.
+            stress_unit: Unit of the on-disk ``stress`` field. Defaults to
+                ``"kbar"`` (raw VASP convention, compressive = positive — the
+                standard for MatPES JSONs). matgl's internal unit is **GPa**
+                with compressive = negative (README, "Model Training"), so the
+                default ``"kbar"`` factor is ``-0.1`` and applies the
+                "multiply VASP stress by -0.1" recipe in one step. Pass
+                ``"GPa"`` if the file is already in matgl convention, or
+                ``"eV/A3"`` for an eV/Å³ source (magnitude only — supply the
+                correct sign yourself).
+            batch_size: When given, the dataset is split and wrapped in
+                :func:`MGLDataLoader`; the method then returns a
+                ``(train_loader, val_loader, test_loader)`` triple. When
+                ``None`` (default), the raw ``MGLDataset`` is returned and the
+                caller can call :func:`split_dataset` / :func:`MGLDataLoader`
+                themselves.
+            split: Train / val / test fractions used when ``batch_size`` is
+                given. Defaults to ``(0.8, 0.1, 0.1)`` (matching
+                :func:`split_dataset`). Ignored when ``batch_size`` is ``None``.
+            shuffle: Whether to shuffle indices before splitting. Defaults to
+                ``True``. Ignored when ``batch_size`` is ``None``.
+            random_state: Seed for the shuffle so splits are reproducible.
+                Ignored when ``batch_size`` is ``None``.
+            **loader_kwargs: Extra kwargs forwarded to :func:`MGLDataLoader`
+                (e.g. ``num_workers``, ``pin_memory``, ``collate_fn``). Only
+                used when ``batch_size`` is given.
+
+        Returns:
+            An ``MGLDataset`` (when ``batch_size is None``) or a
+            ``(train_loader, val_loader, test_loader)`` tuple ready to feed
+            into a training loop.
+        """
+        # Inline walk of the MatPES sample list. Each record carries a
+        # pymatgen-serialisable ``structure`` plus the three PES targets;
+        # everything else is dropped.
+        factor = _STRESS_UNIT_TO_GPA[stress_unit]
+        structures: list[Structure] = []
+        energies: list[float] = []
+        forces: list = []
+        stresses: list = []
+        for raw in loadfn(path):
+            struct = raw["structure"]
+            if not isinstance(struct, Structure):
+                struct = Structure.from_dict(struct)
+            structures.append(struct)
+            energies.append(float(raw["energy"]))
+            forces.append(np.asarray(raw["forces"], dtype="float64").tolist())
+            stresses.append((np.asarray(raw["stress"], dtype="float64") * factor).tolist())
+
+        dataset = _build_pes_dataset(
+            structures,
+            {"energies": energies, "forces": forces, "stresses": stresses},
             cutoff=cutoff,
             element_types=element_types,
             save_cache=save_cache,
             root=root,
-            stress_unit=stress_unit,
+        )
+
+        if batch_size is None:
+            return dataset
+
+        # Lazy import: ``MGLDataLoader`` lives behind the backend split in
+        # ``matgl.graph.data`` and we don't want to pay for it on the raw-
+        # dataset path.
+        from matgl.graph.data import MGLDataLoader, split_dataset
+
+        frac_list = list(split) if split is not None else [0.8, 0.1, 0.1]
+        train_data, val_data, test_data = split_dataset(
+            dataset,
+            frac_list=frac_list,
+            shuffle=shuffle,
+            random_state=random_state,
+        )
+        return MGLDataLoader(
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            batch_size=batch_size,
+            **loader_kwargs,
         )
 
     def matpes_element_refs(
         self,
-        version: str = "r2SCAN-2025.2",
+        version: str = "R2SCAN-2025.2",
         *,
         repo_id: str | None = None,
         element_types: tuple[str, ...] = (),
@@ -1110,7 +1171,8 @@ class MGLDatasetLoader:
             ``np.ndarray`` of shape ``(len(element_types),)``, dtype
             ``float64``, with offsets in the supplied element order.
         """
-        filename = _matpes_atomrefs_filename(version)
+        functional, _ = version.split("-")
+        filename = f"MatPES-{functional.upper()}-atoms.json"
         local_path = _hf_download_cached_first(
             repo_id=repo_id or self.repo_id,
             filename=filename,
