@@ -1153,6 +1153,64 @@ class MGLPotentialTrainer:
         trainer = MGLPotentialTrainer(model, accelerator="gpu")
         potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet")
 
+    **Logging / callbacks.** The trainer instantiates ``pl.Trainer`` inside
+    :meth:`fit` and forwards anything passed via ``trainer_kwargs`` straight
+    to it — Lightning's full ``callbacks`` / ``logger`` vocabulary works
+    unchanged. :class:`PotentialLightningModule` logs ``Total_Loss``,
+    ``Energy_MAE``, ``Force_MAE``, ``Stress_MAE`` (plus ``Magmom_MAE`` /
+    ``Charge_MAE`` when those heads are active) each prefixed with
+    ``train_`` / ``val_`` / ``test_`` and the same set of ``*_RMSE`` keys
+    — those are the names a ``ModelCheckpoint`` / ``EarlyStopping`` /
+    logger sees::
+
+        from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+        from lightning.pytorch.loggers import CSVLogger
+
+        trainer = MGLPotentialTrainer(
+            model,
+            accelerator="gpu",
+            trainer_kwargs={
+                "logger": CSVLogger(save_dir="./logs", name="matpes-tensornet"),
+                "callbacks": [
+                    LearningRateMonitor(logging_interval="epoch"),
+                    ModelCheckpoint(
+                        dirpath="./logs/ckpts",
+                        monitor="val_Total_Loss",
+                        mode="min",
+                        save_top_k=3,
+                    ),
+                    EarlyStopping(monitor="val_Total_Loss", patience=20, mode="min"),
+                ],
+            },
+        )
+
+    Swap ``CSVLogger`` for ``TensorBoardLogger`` / ``WandbLogger`` /
+    ``MLFlowLogger`` as needed (or pass a list for multi-sink logging).
+
+    For per-epoch dumping of every prediction / label / error in stable
+    sample order, matgl ships :class:`matgl.utils.callbacks.PredictionLogger`
+    (call :func:`matgl.utils.callbacks.add_sample_indices` on the split(s)
+    you want logged before ``fit``). For ad-hoc instrumentation, drop a
+    custom ``pl.Callback`` subclass into ``callbacks``;
+    :meth:`PotentialLightningModule.training_step` /
+    :meth:`~PotentialLightningModule.validation_step` return
+    ``{"loss", "preds", "labels", "indices", "num_atoms"}`` as ``outputs``::
+
+        import lightning.pytorch as pl
+
+        class LogForceRMS(pl.Callback):
+            def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+                force_pred, force_label = outputs["preds"][1], outputs["labels"][1]
+                pl_module.log(
+                    "train_force_rms",
+                    (force_pred - force_label).pow(2).mean().sqrt(),
+                    on_step=True, on_epoch=False,
+                )
+
+        trainer = MGLPotentialTrainer(
+            model, trainer_kwargs={"callbacks": [LogForceRMS()]}
+        )
+
     The trainer is PyG-only; DGL is being deprecated. The class itself
     imports cleanly under DGL but ``fit`` raises informatively when called.
     """
@@ -1219,8 +1277,14 @@ class MGLPotentialTrainer:
             devices: ``pl.Trainer`` device count or selector (e.g. ``1``,
                 ``"auto"``, ``[0, 1]``).
             seed: Forwarded to ``pl.seed_everything(workers=True)`` at fit time.
-            trainer_kwargs: Extra ``pl.Trainer`` kwargs (e.g. ``callbacks``,
-                ``logger``).
+            trainer_kwargs: Extra ``pl.Trainer`` kwargs forwarded verbatim;
+                this is the entry point for Lightning ``callbacks`` and
+                ``logger``. See the *Logging / callbacks* recipe in the class
+                docstring for the canonical
+                ``CSVLogger`` + ``ModelCheckpoint`` + ``EarlyStopping`` setup,
+                the matgl-native :class:`matgl.utils.callbacks.PredictionLogger`,
+                and the metric names (``train_*`` / ``val_*`` / ``test_*``)
+                available to monitor.
             loader_kwargs: Extra kwargs forwarded to :class:`MGLDataLoader` /
                 :func:`split_dataset` via :meth:`_build_dataloaders`.
                 Recognised split-only keys: ``frac_list``, ``shuffle``,
