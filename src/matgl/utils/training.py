@@ -916,15 +916,10 @@ class MGLDatasetLoader:
     (The instance form ``loader.from_json(...)`` works too, for callers that
     already hold a loader.)
 
-    Or fold the split + ``MGLDataLoader`` step into the same call by passing
-    a ``batch_size`` (optionally with custom ``split`` fractions / ``shuffle``
-    / ``random_state``)::
-
-        train, val, test = MGLDatasetLoader.from_json(
-            "/path/to/MatPES-r2SCAN-2025.2.json",
-            batch_size=32,
-            split=(0.8, 0.1, 0.1),
-        )
+    Splitting + ``MGLDataLoader`` wrapping is the trainer's job — hand the
+    returned ``MGLDataset`` straight to ``MGLPotentialTrainer.fit(...)`` and
+    let it apply ``frac_list`` / ``shuffle`` / ``random_state`` from its own
+    ``loader_kwargs``.
 
     See :meth:`from_json` for the expected schema (the same one the live
     MatPES JSONs ship in: ``structure`` + ``energy`` + ``forces`` + ``stress``
@@ -993,7 +988,7 @@ class MGLDatasetLoader:
             monolithic files are 1.6-2.4 GB.
         """
         functional, tag = version.split("-")
-        filename = f"MatPES-{functional}-{tag}.json"
+        filename = f"MatPES-{functional.upper()}-{tag}.json"
         local_path = _hf_download_cached_first(
             repo_id=repo_id or self.repo_id,
             filename=filename,
@@ -1002,20 +997,13 @@ class MGLDatasetLoader:
             token=self.token,
             cache_dir=self.cache_dir,
         )
-        # ``from_json`` is a staticmethod and returns a Union; without
-        # ``batch_size`` it always gives back an ``MGLDataset``, but mypy
-        # can't narrow on the missing kwarg so cast explicitly to preserve
-        # this method's narrower signature.
-        return cast(
-            "MGLDataset",
-            MGLDatasetLoader.from_json(
-                local_path,
-                cutoff=cutoff,
-                element_types=element_types,
-                save_cache=save_cache,
-                root=root,
-                stress_unit=stress_unit,
-            ),
+        return MGLDatasetLoader.from_json(
+            local_path,
+            cutoff=cutoff,
+            element_types=element_types,
+            save_cache=save_cache,
+            root=root,
+            stress_unit=stress_unit,
         )
 
     @staticmethod
@@ -1027,13 +1015,8 @@ class MGLDatasetLoader:
         save_cache: bool = True,
         root: str | None = None,
         stress_unit: StressUnit = "kbar",
-        batch_size: int | None = None,
-        split: Sequence[float] | None = None,
-        shuffle: bool = True,
-        random_state: int = 42,
-        **loader_kwargs,
-    ) -> MGLDataset | tuple[DataLoader, ...]:
-        """Build an ``MGLDataset`` (or train/val/test ``DataLoader`` triple) from a local MatPES-shaped JSON file.
+    ) -> MGLDataset:
+        """Build an ``MGLDataset`` from a local MatPES-shaped JSON file.
 
         The file format mirrors the live MatPES JSON dataset exactly — a flat
         JSON list of per-frame records, one record per (structure, PES data)
@@ -1057,6 +1040,11 @@ class MGLDatasetLoader:
         ``magmoms``, provenance metadata) are ignored — only the four PES
         keys above are read.
 
+        Splitting + ``MGLDataLoader`` wrapping is handled inside
+        :class:`MGLPotentialTrainer` (see its ``frac_list`` / ``shuffle`` /
+        ``random_state`` ``loader_kwargs``), so this method only returns the
+        raw ``MGLDataset``; hand it straight to ``trainer.fit(dataset=...)``.
+
         Args:
             path: Path to the JSON file. ``.json``, ``.json.gz``, and other
                 formats supported by ``monty.serialization.loadfn`` all work.
@@ -1074,27 +1062,10 @@ class MGLDatasetLoader:
                 ``"GPa"`` if the file is already in matgl convention, or
                 ``"eV/A3"`` for an eV/Å³ source (magnitude only — supply the
                 correct sign yourself).
-            batch_size: When given, the dataset is split and wrapped in
-                :func:`MGLDataLoader`; the method then returns a
-                ``(train_loader, val_loader, test_loader)`` triple. When
-                ``None`` (default), the raw ``MGLDataset`` is returned and the
-                caller can call :func:`split_dataset` / :func:`MGLDataLoader`
-                themselves.
-            split: Train / val / test fractions used when ``batch_size`` is
-                given. Defaults to ``(0.8, 0.1, 0.1)`` (matching
-                :func:`split_dataset`). Ignored when ``batch_size`` is ``None``.
-            shuffle: Whether to shuffle indices before splitting. Defaults to
-                ``True``. Ignored when ``batch_size`` is ``None``.
-            random_state: Seed for the shuffle so splits are reproducible.
-                Ignored when ``batch_size`` is ``None``.
-            **loader_kwargs: Extra kwargs forwarded to :func:`MGLDataLoader`
-                (e.g. ``num_workers``, ``pin_memory``, ``collate_fn``). Only
-                used when ``batch_size`` is given.
 
         Returns:
-            An ``MGLDataset`` (when ``batch_size is None``) or a
-            ``(train_loader, val_loader, test_loader)`` tuple ready to feed
-            into a training loop.
+            An ``MGLDataset`` ready to drop into
+            :class:`MGLPotentialTrainer.fit`.
         """
         # Inline walk of the MatPES sample list. Each record carries a
         # pymatgen-serialisable ``structure`` plus the three PES targets;
@@ -1113,36 +1084,13 @@ class MGLDatasetLoader:
             forces.append(np.asarray(raw["forces"], dtype="float64").tolist())
             stresses.append((np.asarray(raw["stress"], dtype="float64") * factor).tolist())
 
-        dataset = _build_pes_dataset(
+        return _build_pes_dataset(
             structures,
             {"energies": energies, "forces": forces, "stresses": stresses},
             cutoff=cutoff,
             element_types=element_types,
             save_cache=save_cache,
             root=root,
-        )
-
-        if batch_size is None:
-            return dataset
-
-        # Lazy import: ``MGLDataLoader`` lives behind the backend split in
-        # ``matgl.graph.data`` and we don't want to pay for it on the raw-
-        # dataset path.
-        from matgl.graph.data import MGLDataLoader, split_dataset
-
-        frac_list = list(split) if split is not None else [0.8, 0.1, 0.1]
-        train_data, val_data, test_data = split_dataset(
-            dataset,
-            frac_list=frac_list,
-            shuffle=shuffle,
-            random_state=random_state,
-        )
-        return MGLDataLoader(
-            train_data=train_data,
-            val_data=val_data,
-            test_data=test_data,
-            batch_size=batch_size,
-            **loader_kwargs,
         )
 
     def matpes_element_refs(

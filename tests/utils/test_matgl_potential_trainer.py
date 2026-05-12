@@ -322,51 +322,6 @@ class TestLoadMatpesDatasetFromJson:
             atol=0.0,
         )
 
-    def test_batch_size_returns_dataloader_triple(self, tmp_path):
-        """Passing ``batch_size`` splits the dataset and returns (train, val, test) loaders."""
-        from torch.utils.data import DataLoader
-
-        flat = _flat_parity_payload_path(tmp_path)
-        loaders = MGLDatasetLoader().from_json(
-            flat,
-            cutoff=4.0,
-            save_cache=False,
-            root=str(tmp_path / "ds"),
-            stress_unit="GPa",
-            batch_size=2,
-            split=(0.6, 0.2, 0.2),
-            num_workers=0,
-            random_state=7,
-        )
-        assert isinstance(loaders, tuple)
-        assert len(loaders) == 3
-        train_loader, val_loader, test_loader = loaders
-        assert all(isinstance(loader, DataLoader) for loader in (train_loader, val_loader, test_loader))
-        # Every loader must produce at least one batch with the requested
-        # batch_size honoured (last batch may be smaller for non-divisible
-        # split sizes).
-        for loader in (train_loader, val_loader, test_loader):
-            batches = list(loader)
-            assert batches, "split fraction produced an empty loader"
-            assert batches[0][0].batch_size <= 2
-
-    def test_default_split_when_only_batch_size_given(self, tmp_path):
-        """Omitting ``split`` falls back to ``split_dataset``'s 80/10/10 default."""
-        flat = _flat_parity_payload_path(tmp_path)
-        train, val, test = MGLDatasetLoader().from_json(
-            flat,
-            cutoff=4.0,
-            save_cache=False,
-            root=str(tmp_path / "ds"),
-            stress_unit="GPa",
-            batch_size=4,
-            num_workers=0,
-        )
-        total = len(train.dataset) + len(val.dataset) + len(test.dataset)
-        # 80/10/10 split: train ≈ 0.8 * total (floor); the remainder lands in val/test.
-        assert len(train.dataset) == int(0.8 * total)
-        assert len(val.dataset) == int(0.1 * total)
-
 
 # ---------------------------------------------------------------------------
 # MatPES element-refs loader (monkeypatched HF).
