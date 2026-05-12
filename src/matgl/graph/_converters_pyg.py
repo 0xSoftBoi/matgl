@@ -75,9 +75,14 @@ class GraphConverter(metaclass=abc.ABCMeta):
         # numpy arrays (e.g. ``[lattice_matrix]`` for a single periodic cell);
         # routing those through ``np.asarray`` first avoids the
         # "Creating a tensor from a list of numpy.ndarrays is extremely slow"
-        # warning from ``torch.as_tensor``.
+        # warning from ``torch.as_tensor``. We also force a copy when the array
+        # is not writable (``pymatgen``'s ``Lattice.matrix`` returns a
+        # read-only array, and ``np.expand_dims`` propagates that flag) since
+        # PyTorch warns when constructing a tensor from a non-writable array.
         if not isinstance(lattice_matrix, torch.Tensor):
             lattice_matrix = np.asarray(lattice_matrix)
+            if not lattice_matrix.flags.writeable:
+                lattice_matrix = lattice_matrix.copy()
         lattice = torch.as_tensor(lattice_matrix, dtype=matgl.float_th, device=device)
 
         # Create node features (node_type based on element indices). Use a dict

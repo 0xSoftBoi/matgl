@@ -10,7 +10,6 @@ so a small handful of methods branch on ``matgl.config.BACKEND``. Everything els
 from __future__ import annotations
 
 import math
-import re
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import lightning as pl
@@ -802,15 +801,6 @@ def xavier_init(model: nn.Module, gain: float = 1.0, distribution: Literal["unif
 
 HF_MATPES_REPO_ID = "materialyze/matpes"
 
-# Filename patterns that map to the (train, test, valid) trio inside an extxyz
-# tarball. We accept either ``-`` or ``_`` separators around the tag, and treat
-# ``val`` as a synonym for ``valid``.
-_EXTXYZ_SPLIT_PATTERNS: dict[str, re.Pattern[str]] = {
-    "train": re.compile(r"[-_]train\.(?:ext)?xyz$", re.IGNORECASE),
-    "test": re.compile(r"[-_]test\.(?:ext)?xyz$", re.IGNORECASE),
-    "valid": re.compile(r"[-_]val(?:id)?\.(?:ext)?xyz$", re.IGNORECASE),
-}
-
 # Stress-unit conversion to matgl's internal unit (**GPa**, compressive =
 # negative — see the "Model Training" section of the README). ``1 GPa = 10
 # kbar = 1/160.21766208 eV/Å³``. The ``"kbar"`` factor is ``-0.1``, which both
@@ -829,40 +819,12 @@ _STRESS_UNIT_TO_GPA: dict[str, float] = {
 }
 
 
-def _matpes_parse_version(version: str) -> tuple[str, str]:
-    """Split a MatPES version into ``(functional_upper, version_tag)``.
-
-    Examples:
-        ``"r2SCAN-2025.2"`` -> ``("R2SCAN", "2025.2")``
-        ``"PBE-2025.1"``    -> ``("PBE", "2025.1")``
-    """
-    if "-" not in version:
-        raise ValueError(
-            f"Invalid MatPES version {version!r}: expected '<functional>-<tag>' (e.g. 'r2SCAN-2025.2', 'PBE-2025.2')."
-        )
-    functional, _, tag = version.partition("-")
-    if not functional or not tag:
-        raise ValueError(f"Invalid MatPES version {version!r}: both functional and tag must be non-empty.")
-    return functional.upper(), tag
-
-
-def _matpes_dataset_filename(version: str) -> str:
-    """Return the on-disk MatPES filename for a given version (and optional split)."""
-    functional, tag = _matpes_parse_version(version)
-    return f"MatPES-{functional}-{tag}.json"
-
-
-def _matpes_atomrefs_filename(version: str) -> str:
-    """Return the MatPES atomrefs filename (functional-specific only)."""
-    functional, _ = _matpes_parse_version(version)
-    return f"MatPES-{functional}-atoms.json"
-
-
-# Per-atom MatPES partial-charge sources. The default Bader analysis ships in
-# the top-level ``bader_charges`` field as electron counts (e). DDEC6 net atomic
-# charges live under ``ddec6.partial_charges`` (Chargemol output); CM5 charges
-# under the top-level ``cm5_partial_charges``. Any of the three can be ``None``
-# for a given sample if the upstream calculation failed.
+# Per-atom MatPES partial-charge sources. DDEC6 net atomic charges live under
+# ``ddec6.partial_charges`` (Chargemol output) and are the matgl default; the
+# Bader analysis ships in the top-level ``bader_charges`` field as electron
+# counts (e); CM5 charges under the top-level ``cm5_partial_charges``. Any of
+# the three can be ``None`` for a given sample if the upstream calculation
+# failed.
 ChargesSource = Literal["bader", "ddec6", "cm5"]
 MagmomsSource = Literal["bader", "ddec6"]
 
@@ -939,7 +901,7 @@ def _matpes_samples_to_lists(
 
     Args:
         samples: Iterable of MatPES sample dicts.
-        stress_unit: On-disk stress unit; see :func:`_read_matpes_dataset_local`.
+        stress_unit: On-disk stress unit; see :meth:`MGLDatasetLoader.from_json`.
         include_charges: If truthy, extract per-atom partial charges under the
             label key ``"charges"`` and drop samples with missing values.
             ``True`` selects DDEC6 net atomic charges
@@ -1011,10 +973,6 @@ def _matpes_samples_to_lists(
     return structures, labels
 
 
-def _resolve_cache_dir(cache_dir: str | Path | None) -> str:
-    return str(cache_dir) if cache_dir is not None else str(MATGL_CACHE)
-
-
 def _hf_download_cached_first(
     *,
     repo_id: str,
@@ -1022,7 +980,7 @@ def _hf_download_cached_first(
     repo_type: str,
     revision: str | None,
     token: str | None,
-    cache_dir: str | Path | None,
+    cache_dir: str | Path | None = MATGL_CACHE,
 ) -> str:
     """Return the local path for an HF Hub file, using the cache when available.
 
@@ -1032,12 +990,11 @@ def _hf_download_cached_first(
     cached snapshot path with no network access, so we use it as a fast path
     and only fall through to ``hf_hub_download`` on a miss.
     """
-    resolved = _resolve_cache_dir(cache_dir)
     cached = try_to_load_from_cache(
         repo_id=repo_id,
         filename=filename,
         repo_type=repo_type,
-        cache_dir=resolved,
+        cache_dir=cache_dir,
         revision=revision,
     )
     # ``cached`` is a path string when the file is in cache, ``None`` when not
@@ -1051,7 +1008,7 @@ def _hf_download_cached_first(
         repo_type=repo_type,
         revision=revision,
         token=token,
-        cache_dir=resolved,
+        cache_dir=cache_dir,
     )
 
 
@@ -1085,50 +1042,6 @@ def _build_pes_dataset(
     return dataset
 
 
-def _read_matpes_dataset_local(
-    local_path: str | Path,
-    *,
-    cutoff: float = 5.0,
-    element_types: tuple[str, ...] | None = None,
-    save_cache: bool = True,
-    root: str | None = None,
-    stress_unit: StressUnit = "kbar",
-    include_charges: bool | ChargesSource = False,
-    include_magmoms: bool | MagmomsSource = False,
-) -> MGLDataset:
-    """Read a (locally cached) MatPES JSON file and build an ``MGLDataset``.
-
-    Stresses on disk are stored in **kbar** (raw VASP convention,
-    compressive = positive). They are converted to **GPa** with the
-    compressive-negative sign convention used throughout matgl — see the
-    "Model Training" section of the README — by multiplying by the
-    ``stress_unit`` factor (``-0.1`` for the default ``"kbar"``).
-    Pass ``stress_unit="GPa"`` if the file is already in matgl convention.
-
-    When ``include_charges`` / ``include_magmoms`` is truthy, the corresponding
-    per-atom field is copied into the dataset's labels under the matgl key
-    (``"charges"`` / ``"magmoms"``) and any sample missing that field is
-    dropped. ``True`` selects DDEC6 (the default); pass ``"bader"`` or
-    ``"cm5"`` (charges only) to select a different source.
-    """
-    samples = loadfn(local_path)
-    structures, labels = _matpes_samples_to_lists(
-        samples,
-        stress_unit=stress_unit,
-        include_charges=include_charges,
-        include_magmoms=include_magmoms,
-    )
-
-    return _build_pes_dataset(
-        structures,
-        labels,
-        cutoff=cutoff,
-        element_types=element_types,
-        save_cache=save_cache,
-        root=root,
-    )
-
-
 class MGLDatasetLoader:
     """Factory for building :class:`MGLDataset` objects from external sources.
 
@@ -1148,6 +1061,24 @@ class MGLDatasetLoader:
             repo_id="my-org/matpes-fork", token="hf_...", revision="dev"
         )
 
+    Already have a MatPES (or MatPES-shaped) JSON on disk? Skip the HF round
+    trip and load it directly. :meth:`from_json` is a ``@staticmethod`` — it
+    needs no loader state and can be called on the class itself::
+
+        ds = MGLDatasetLoader.from_json("/path/to/MatPES-r2SCAN-2025.2.json")
+
+    (The instance form ``loader.from_json(...)`` works too, for callers that
+    already hold a loader.)
+
+    Splitting + ``MGLDataLoader`` wrapping is the trainer's job — hand the
+    returned ``MGLDataset`` straight to ``MGLPotentialTrainer.fit(...)`` and
+    let it apply ``frac_list`` / ``shuffle`` / ``random_state`` from its own
+    ``loader_kwargs``.
+
+    See :meth:`from_json` for the expected schema (the same one the live
+    MatPES JSONs ship in: ``structure`` + ``energy`` + ``forces`` + ``stress``
+    per record).
+
     This class only constructs datasets; training itself is handled by
     :class:`MGLPotentialTrainer`.
     """
@@ -1158,7 +1089,7 @@ class MGLDatasetLoader:
         repo_id: str = HF_MATPES_REPO_ID,
         revision: str | None = None,
         token: str | None = None,
-        cache_dir: str | Path | None = None,
+        cache_dir: str | Path | None = MATGL_CACHE,
     ) -> None:
         """Initialise the loader with shared HF Hub config.
 
@@ -1178,7 +1109,7 @@ class MGLDatasetLoader:
 
     def matpes_dataset(
         self,
-        version: str = "r2SCAN-2025.2",
+        version: str = "R2SCAN-2025.2",
         *,
         cutoff: float = 5.0,
         element_types: tuple[str, ...] | None = None,
@@ -1228,7 +1159,8 @@ class MGLDatasetLoader:
             An ``MGLDataset`` ready to drop into ``MGLDataLoader``. The
             monolithic files are 1.6-2.4 GB.
         """
-        filename = _matpes_dataset_filename(version)
+        functional, tag = version.split("-")
+        filename = f"MatPES-{functional.upper()}-{tag}.json"
         local_path = _hf_download_cached_first(
             repo_id=repo_id or self.repo_id,
             filename=filename,
@@ -1237,7 +1169,7 @@ class MGLDatasetLoader:
             token=self.token,
             cache_dir=self.cache_dir,
         )
-        return _read_matpes_dataset_local(
+        return MGLDatasetLoader.from_json(
             local_path,
             cutoff=cutoff,
             element_types=element_types,
@@ -1248,9 +1180,106 @@ class MGLDatasetLoader:
             include_magmoms=include_magmoms,
         )
 
+    @staticmethod
+    def from_json(
+        path: str | Path,
+        *,
+        cutoff: float = 5.0,
+        element_types: tuple[str, ...] | None = None,
+        save_cache: bool = True,
+        root: str | None = None,
+        stress_unit: StressUnit = "kbar",
+        include_charges: bool | ChargesSource = False,
+        include_magmoms: bool | MagmomsSource = False,
+    ) -> MGLDataset:
+        """Build an ``MGLDataset`` from a local MatPES-shaped JSON file.
+
+        The file format mirrors the live MatPES JSON dataset exactly — a flat
+        JSON list of per-frame records, one record per (structure, PES data)
+        pair. Custom DFT runs and MatPES forks that respect this schema drop
+        in unchanged. No HF Hub round trip happens; this is the local-disk
+        sibling of :meth:`matpes_dataset`.
+
+        **Schema (per record)** — the important keys are:
+
+        - ``structure`` (**required**): a pymatgen ``Structure`` or its
+          MSONable ``as_dict()`` form — anything ``Structure.from_dict`` can
+          rebuild. Carries the atomic positions, lattice, and species.
+        - ``energy`` (**required**): total energy in **eV** as a scalar.
+        - ``forces`` (**required**): per-atom forces in **eV/Å**, shape
+          ``(N_atoms, 3)`` (list-of-lists is fine).
+        - ``stress`` (**required**): stress tensor as either a ``3x3`` or
+          length-6 (Voigt) array. Units are controlled by ``stress_unit``
+          below; the default matches MatPES on-disk convention.
+        - ``bader_charges`` / ``cm5_partial_charges`` / ``ddec6.partial_charges``
+          (optional): per-atom partial charges, surfaced under the dataset
+          label ``"charges"`` when ``include_charges`` is truthy.
+        - ``bader_magmoms`` / ``ddec6.spin_moments`` (optional): per-atom
+          magnetic moments, surfaced under ``"magmoms"`` when
+          ``include_magmoms`` is truthy.
+
+        Any other extra keys in each record (e.g. ``functional``, ``bandgap``,
+        provenance metadata) are ignored.
+
+        Splitting + ``MGLDataLoader`` wrapping is handled inside
+        :class:`MGLPotentialTrainer` (see its ``frac_list`` / ``shuffle`` /
+        ``random_state`` ``loader_kwargs``), so this method only returns the
+        raw ``MGLDataset``; hand it straight to ``trainer.fit(dataset=...)``.
+
+        Args:
+            path: Path to the JSON file. ``.json``, ``.json.gz``, and other
+                formats supported by ``monty.serialization.loadfn`` all work.
+            cutoff: Neighbour cutoff (Å) handed to ``Structure2Graph``.
+            element_types: Optional explicit ordering; auto-derived from the
+                structures when ``None``.
+            save_cache: Whether ``MGLDataset`` persists its processed cache.
+            root: ``MGLDataset`` root directory; default lets it pick.
+            stress_unit: Unit of the on-disk ``stress`` field. Defaults to
+                ``"kbar"`` (raw VASP convention, compressive = positive — the
+                standard for MatPES JSONs). matgl's internal unit is **GPa**
+                with compressive = negative (README, "Model Training"), so the
+                default ``"kbar"`` factor is ``-0.1`` and applies the
+                "multiply VASP stress by -0.1" recipe in one step. Pass
+                ``"GPa"`` if the file is already in matgl convention, or
+                ``"eV/A3"`` for an eV/Å³ source (magnitude only — supply the
+                correct sign yourself).
+            include_charges: If truthy, copy per-atom partial charges into the
+                dataset's labels under the key ``"charges"``. ``True`` selects
+                DDEC6 net atomic charges (``ddec6.partial_charges``, from
+                Chargemol — the matgl default for QET-style training); pass
+                ``"bader"`` for Bader electron counts (``bader_charges``) or
+                ``"cm5"`` for CM5 (``cm5_partial_charges``). Samples whose
+                chosen source is ``None`` (calculation failed upstream) are
+                dropped — the dataset is silently shorter than the input file.
+            include_magmoms: If truthy, copy per-atom magnetic moments into
+                the dataset's labels under ``"magmoms"``. ``True`` selects
+                DDEC6 spin moments (``ddec6.spin_moments``); pass ``"bader"``
+                for Bader magmoms (``bader_magmoms``). Same drop-on-missing
+                semantics as ``include_charges``.
+
+        Returns:
+            An ``MGLDataset`` ready to drop into
+            :class:`MGLPotentialTrainer.fit`.
+        """
+        structures, labels = _matpes_samples_to_lists(
+            loadfn(path),
+            stress_unit=stress_unit,
+            include_charges=include_charges,
+            include_magmoms=include_magmoms,
+        )
+
+        return _build_pes_dataset(
+            structures,
+            labels,
+            cutoff=cutoff,
+            element_types=element_types,
+            save_cache=save_cache,
+            root=root,
+        )
+
     def matpes_element_refs(
         self,
-        version: str = "r2SCAN-2025.2",
+        version: str = "R2SCAN-2025.2",
         *,
         repo_id: str | None = None,
         element_types: tuple[str, ...] = (),
@@ -1274,7 +1303,8 @@ class MGLDatasetLoader:
             ``np.ndarray`` of shape ``(len(element_types),)``, dtype
             ``float64``, with offsets in the supplied element order.
         """
-        filename = _matpes_atomrefs_filename(version)
+        functional, _ = version.split("-")
+        filename = f"MatPES-{functional.upper()}-atoms.json"
         local_path = _hf_download_cached_first(
             repo_id=repo_id or self.repo_id,
             filename=filename,
@@ -1306,6 +1336,64 @@ class MGLPotentialTrainer:
         )
         trainer = MGLPotentialTrainer(model, accelerator="gpu")
         potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet")
+
+    **Logging / callbacks.** The trainer instantiates ``pl.Trainer`` inside
+    :meth:`fit` and forwards anything passed via ``trainer_kwargs`` straight
+    to it — Lightning's full ``callbacks`` / ``logger`` vocabulary works
+    unchanged. :class:`PotentialLightningModule` logs ``Total_Loss``,
+    ``Energy_MAE``, ``Force_MAE``, ``Stress_MAE`` (plus ``Magmom_MAE`` /
+    ``Charge_MAE`` when those heads are active) each prefixed with
+    ``train_`` / ``val_`` / ``test_`` and the same set of ``*_RMSE`` keys
+    — those are the names a ``ModelCheckpoint`` / ``EarlyStopping`` /
+    logger sees::
+
+        from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+        from lightning.pytorch.loggers import CSVLogger
+
+        trainer = MGLPotentialTrainer(
+            model,
+            accelerator="gpu",
+            trainer_kwargs={
+                "logger": CSVLogger(save_dir="./logs", name="matpes-tensornet"),
+                "callbacks": [
+                    LearningRateMonitor(logging_interval="epoch"),
+                    ModelCheckpoint(
+                        dirpath="./logs/ckpts",
+                        monitor="val_Total_Loss",
+                        mode="min",
+                        save_top_k=3,
+                    ),
+                    EarlyStopping(monitor="val_Total_Loss", patience=20, mode="min"),
+                ],
+            },
+        )
+
+    Swap ``CSVLogger`` for ``TensorBoardLogger`` / ``WandbLogger`` /
+    ``MLFlowLogger`` as needed (or pass a list for multi-sink logging).
+
+    For per-epoch dumping of every prediction / label / error in stable
+    sample order, matgl ships :class:`matgl.utils.callbacks.PredictionLogger`
+    (call :func:`matgl.utils.callbacks.add_sample_indices` on the split(s)
+    you want logged before ``fit``). For ad-hoc instrumentation, drop a
+    custom ``pl.Callback`` subclass into ``callbacks``;
+    :meth:`PotentialLightningModule.training_step` /
+    :meth:`~PotentialLightningModule.validation_step` return
+    ``{"loss", "preds", "labels", "indices", "num_atoms"}`` as ``outputs``::
+
+        import lightning.pytorch as pl
+
+        class LogForceRMS(pl.Callback):
+            def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+                force_pred, force_label = outputs["preds"][1], outputs["labels"][1]
+                pl_module.log(
+                    "train_force_rms",
+                    (force_pred - force_label).pow(2).mean().sqrt(),
+                    on_step=True, on_epoch=False,
+                )
+
+        trainer = MGLPotentialTrainer(
+            model, trainer_kwargs={"callbacks": [LogForceRMS()]}
+        )
 
     The trainer is PyG-only; DGL is being deprecated. The class itself
     imports cleanly under DGL but ``fit`` raises informatively when called.
@@ -1385,8 +1473,14 @@ class MGLPotentialTrainer:
             devices: ``pl.Trainer`` device count or selector (e.g. ``1``,
                 ``"auto"``, ``[0, 1]``).
             seed: Forwarded to ``pl.seed_everything(workers=True)`` at fit time.
-            trainer_kwargs: Extra ``pl.Trainer`` kwargs (e.g. ``callbacks``,
-                ``logger``).
+            trainer_kwargs: Extra ``pl.Trainer`` kwargs forwarded verbatim;
+                this is the entry point for Lightning ``callbacks`` and
+                ``logger``. See the *Logging / callbacks* recipe in the class
+                docstring for the canonical
+                ``CSVLogger`` + ``ModelCheckpoint`` + ``EarlyStopping`` setup,
+                the matgl-native :class:`matgl.utils.callbacks.PredictionLogger`,
+                and the metric names (``train_*`` / ``val_*`` / ``test_*``)
+                available to monitor.
             loader_kwargs: Extra kwargs forwarded to :class:`MGLDataLoader` /
                 :func:`split_dataset` via :meth:`_build_dataloaders`.
                 Recognised split-only keys: ``frac_list``, ``shuffle``,

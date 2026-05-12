@@ -23,43 +23,9 @@ if matgl.config.BACKEND != "PYG":
 
 from matgl.models import TensorNet
 from matgl.utils import training as training_mod
-from matgl.utils.training import (
-    MGLDatasetLoader,
-    MGLPotentialTrainer,
-    _matpes_atomrefs_filename,
-    _matpes_dataset_filename,
-    _matpes_parse_version,
-)
+from matgl.utils.training import MGLDatasetLoader, MGLPotentialTrainer
 
 _NACL_PARITY = pathlib.Path(__file__).parent.parent / "parity_data" / "nacl_training_set.json.gz"
-
-
-# ---------------------------------------------------------------------------
-# Pure-string helpers.
-# ---------------------------------------------------------------------------
-
-
-class TestFilenameHelpers:
-    def test_matpes_dataset_lowercase(self):
-        assert _matpes_dataset_filename("r2SCAN-2025.2") == "MatPES-R2SCAN-2025.2.json"
-
-    def test_matpes_dataset_uppercase(self):
-        assert _matpes_dataset_filename("R2SCAN-2025.2") == "MatPES-R2SCAN-2025.2.json"
-
-    def test_matpes_dataset_pbe(self):
-        assert _matpes_dataset_filename("PBE-2025.1") == "MatPES-PBE-2025.1.json"
-
-    def test_atomrefs_filename(self):
-        assert _matpes_atomrefs_filename("r2SCAN-2025.2") == "MatPES-R2SCAN-atoms.json"
-        assert _matpes_atomrefs_filename("PBE-2025.1") == "MatPES-PBE-atoms.json"
-
-    def test_parse_version_invalid(self):
-        with pytest.raises(ValueError, match="Invalid MatPES version"):
-            _matpes_parse_version("invalid")
-        with pytest.raises(ValueError, match="Invalid MatPES version"):
-            _matpes_parse_version("PBE-")
-        with pytest.raises(ValueError, match="Invalid MatPES version"):
-            _matpes_parse_version("-2025.2")
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +195,98 @@ class TestLoadMatpesDataset:
         assert download_calls[0]["repo_type"] == "dataset"
         assert download_calls[0]["filename"] == "MatPES-R2SCAN-2025.2.json"
         assert len(ds) > 0
+
+
+# ---------------------------------------------------------------------------
+# MatPES dataset loader — local-file entry point (no HF traffic).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _NACL_PARITY.exists(), reason="NaCl parity payload missing")
+class TestLoadMatpesDatasetFromJson:
+    def test_classmethod_call_without_instantiation(self, tmp_path):
+        """``from_json`` is a ``@staticmethod`` — callable on the class with no loader instance."""
+        flat = _flat_parity_payload_path(tmp_path)
+        ds = MGLDatasetLoader.from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+        )
+        assert set(ds.labels.keys()) == {"energies", "forces", "stresses"}
+        assert len(ds) == len(ds.labels["energies"])
+
+    def test_loads_from_local_path_without_hf_calls(self, monkeypatch, tmp_path):
+        """``from_json`` reads the JSON directly; HF helpers stay untouched."""
+
+        def fail_hf(**kwargs):
+            raise AssertionError("hf_hub_download must not be called for a local-file load")
+
+        def fail_cache(**kwargs):
+            raise AssertionError("try_to_load_from_cache must not be called for a local-file load")
+
+        monkeypatch.setattr(training_mod, "hf_hub_download", fail_hf)
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", fail_cache)
+
+        flat = _flat_parity_payload_path(tmp_path)
+        ds = MGLDatasetLoader().from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+        )
+
+        assert set(ds.labels.keys()) == {"energies", "forces", "stresses"}
+        assert len(ds) == len(ds.labels["energies"])
+        assert set(ds.element_types) == {"Na", "Cl"}
+
+    def test_matches_hf_path_for_same_payload(self, monkeypatch, tmp_path):
+        """The HF and local entry points produce identical labels for the same JSON bytes."""
+        flat = _flat_parity_payload_path(tmp_path)
+
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **kwargs: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **kwargs: None)
+
+        ds_hf = MGLDatasetLoader().matpes_dataset(
+            version="r2SCAN-2025.2",
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds_hf"),
+            stress_unit="GPa",
+        )
+        ds_file = MGLDatasetLoader().from_json(
+            flat,
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds_file"),
+            stress_unit="GPa",
+        )
+
+        assert len(ds_hf) == len(ds_file)
+        np.testing.assert_allclose(
+            np.asarray(ds_hf.labels["energies"]),
+            np.asarray(ds_file.labels["energies"]),
+        )
+        np.testing.assert_allclose(
+            np.asarray(ds_hf.labels["stresses"]),
+            np.asarray(ds_file.labels["stresses"]),
+        )
+
+    def test_stress_unit_kbar_scales_to_gpa_with_sign_flip(self, tmp_path):
+        """Same kbar → matgl-GPa convention as the HF path."""
+        flat = _flat_parity_payload_path(tmp_path)
+        ds_gpa = MGLDatasetLoader().from_json(
+            flat, cutoff=4.0, save_cache=False, root=str(tmp_path / "g"), stress_unit="GPa"
+        )
+        ds_kbar = MGLDatasetLoader().from_json(flat, cutoff=4.0, save_cache=False, root=str(tmp_path / "k"))
+        np.testing.assert_allclose(
+            np.asarray(ds_kbar.labels["stresses"], dtype="float64"),
+            np.asarray(ds_gpa.labels["stresses"], dtype="float64") * -0.1,
+            rtol=1e-12,
+            atol=0.0,
+        )
 
 
 # ---------------------------------------------------------------------------
