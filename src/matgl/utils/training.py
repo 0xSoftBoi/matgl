@@ -858,18 +858,136 @@ def _matpes_atomrefs_filename(version: str) -> str:
     return f"MatPES-{functional}-atoms.json"
 
 
+# Per-atom MatPES partial-charge sources. The default Bader analysis ships in
+# the top-level ``bader_charges`` field as electron counts (e). DDEC6 net atomic
+# charges live under ``ddec6.partial_charges`` (Chargemol output); CM5 charges
+# under the top-level ``cm5_partial_charges``. Any of the three can be ``None``
+# for a given sample if the upstream calculation failed.
+ChargesSource = Literal["bader", "ddec6", "cm5"]
+MagmomsSource = Literal["bader", "ddec6"]
+
+
+def _extract_bader_charges(raw: Mapping) -> list | None:
+    return raw.get("bader_charges")
+
+
+def _extract_ddec6_charges(raw: Mapping) -> list | None:
+    ddec6 = raw.get("ddec6")
+    return None if ddec6 is None else ddec6.get("partial_charges")
+
+
+def _extract_cm5_charges(raw: Mapping) -> list | None:
+    return raw.get("cm5_partial_charges")
+
+
+def _extract_bader_magmoms(raw: Mapping) -> list | None:
+    return raw.get("bader_magmoms")
+
+
+def _extract_ddec6_magmoms(raw: Mapping) -> list | None:
+    ddec6 = raw.get("ddec6")
+    return None if ddec6 is None else ddec6.get("spin_moments")
+
+
+_CHARGES_EXTRACTORS: dict[str, tuple[str, Any]] = {
+    "bader": ("bader_charges", _extract_bader_charges),
+    "ddec6": ("ddec6.partial_charges", _extract_ddec6_charges),
+    "cm5": ("cm5_partial_charges", _extract_cm5_charges),
+}
+
+_MAGMOMS_EXTRACTORS: dict[str, tuple[str, Any]] = {
+    "bader": ("bader_magmoms", _extract_bader_magmoms),
+    "ddec6": ("ddec6.spin_moments", _extract_ddec6_magmoms),
+}
+
+
+def _resolve_optional_source(
+    flag: bool | str,
+    label: str,
+    extractors: Mapping[str, tuple[str, Any]],
+    default_source: str,
+) -> tuple[str, Any] | None:
+    """Map an ``include_*`` flag to (display_name, extractor) or None when disabled.
+
+    ``True`` -> ``default_source``; a string is looked up in ``extractors``;
+    ``False`` returns ``None`` (skip extraction).
+    """
+    if flag is False:
+        return None
+    src = default_source if flag is True else str(flag).lower()
+    if src not in extractors:
+        raise ValueError(
+            f"Unknown {label} source {src!r}. Available: {sorted(extractors.keys())}.",
+        )
+    return extractors[src]
+
+
 def _matpes_samples_to_lists(
     samples: Iterable[Mapping],
     stress_unit: StressUnit = "kbar",
-) -> tuple[list[Structure], list[float], list, list]:
-    """Walk a MatPES sample list and return parallel (structures, energies, forces, stresses) lists."""
+    *,
+    include_charges: bool | ChargesSource = False,
+    include_magmoms: bool | MagmomsSource = False,
+) -> tuple[list[Structure], dict[str, list]]:
+    """Walk a MatPES sample list and return parallel structures + labels dict.
+
+    Always extracts ``energies``, ``forces``, and ``stresses``. Per-atom optional
+    partial-charge / magmom fields are extracted when the corresponding
+    ``include_*`` flag is truthy; samples whose requested optional field is
+    ``None`` (i.e. the upstream calculation failed) are dropped from every
+    parallel list, so the returned lists stay aligned.
+
+    Args:
+        samples: Iterable of MatPES sample dicts.
+        stress_unit: On-disk stress unit; see :func:`_read_matpes_dataset_local`.
+        include_charges: If truthy, extract per-atom partial charges under the
+            label key ``"charges"`` and drop samples with missing values.
+            ``True`` selects DDEC6 net atomic charges
+            (``ddec6.partial_charges``, the matgl default for QET-style
+            training); pass ``"bader"`` for Bader electron counts
+            (``bader_charges``) or ``"cm5"`` for CM5 charges
+            (``cm5_partial_charges``).
+        include_magmoms: If truthy, extract per-atom magnetic moments under
+            ``"magmoms"`` and drop samples with missing values. ``True``
+            selects DDEC6 spin moments (``ddec6.spin_moments``); pass
+            ``"bader"`` for Bader magmoms (``bader_magmoms``).
+
+    Returns:
+        ``(structures, labels)`` where ``labels`` has keys ``"energies"``,
+        ``"forces"``, ``"stresses"``, and optionally ``"charges"`` / ``"magmoms"``.
+    """
+    # (display_name, extractor_callable) tuples, one per enabled optional.
+    enabled: list[tuple[str, str, Any]] = []
+    charges_resolved = _resolve_optional_source(include_charges, "charges", _CHARGES_EXTRACTORS, "ddec6")
+    if charges_resolved is not None:
+        enabled.append(("charges", *charges_resolved))
+    magmoms_resolved = _resolve_optional_source(include_magmoms, "magmoms", _MAGMOMS_EXTRACTORS, "ddec6")
+    if magmoms_resolved is not None:
+        enabled.append(("magmoms", *magmoms_resolved))
+
     structures: list[Structure] = []
     energies: list[float] = []
     forces: list = []
     stresses: list = []
+    optional_lists: dict[str, list] = {label: [] for label, _, _ in enabled}
     factor = _STRESS_UNIT_TO_GPA[stress_unit]
+    dropped = 0
 
     for raw in samples:
+        # Skip samples missing any requested optional field. We check before
+        # appending anything to keep the parallel lists in lockstep.
+        skip = False
+        optional_values: dict[str, list] = {}
+        for label, _src_name, extractor in enabled:
+            value = extractor(raw)
+            if value is None:
+                skip = True
+                break
+            optional_values[label] = np.asarray(value, dtype="float64").tolist()
+        if skip:
+            dropped += 1
+            continue
+
         struct = raw["structure"]
         if not isinstance(struct, Structure):
             struct = Structure.from_dict(struct)
@@ -877,7 +995,20 @@ def _matpes_samples_to_lists(
         energies.append(float(raw["energy"]))
         forces.append(np.asarray(raw["forces"], dtype="float64").tolist())
         stresses.append((np.asarray(raw["stress"], dtype="float64") * factor).tolist())
-    return structures, energies, forces, stresses
+        for label, val in optional_values.items():
+            optional_lists[label].append(val)
+
+    labels: dict[str, list] = {"energies": energies, "forces": forces, "stresses": stresses, **optional_lists}
+    if dropped and enabled:
+        import warnings
+
+        missing = ", ".join(f"{label}({src})" for label, src, _ in enabled)
+        warnings.warn(
+            f"Dropped {dropped} MatPES samples missing one of: {missing}.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return structures, labels
 
 
 def _resolve_cache_dir(cache_dir: str | Path | None) -> str:
@@ -962,6 +1093,8 @@ def _read_matpes_dataset_local(
     save_cache: bool = True,
     root: str | None = None,
     stress_unit: StressUnit = "kbar",
+    include_charges: bool | ChargesSource = False,
+    include_magmoms: bool | MagmomsSource = False,
 ) -> MGLDataset:
     """Read a (locally cached) MatPES JSON file and build an ``MGLDataset``.
 
@@ -971,13 +1104,24 @@ def _read_matpes_dataset_local(
     "Model Training" section of the README — by multiplying by the
     ``stress_unit`` factor (``-0.1`` for the default ``"kbar"``).
     Pass ``stress_unit="GPa"`` if the file is already in matgl convention.
+
+    When ``include_charges`` / ``include_magmoms`` is truthy, the corresponding
+    per-atom field is copied into the dataset's labels under the matgl key
+    (``"charges"`` / ``"magmoms"``) and any sample missing that field is
+    dropped. ``True`` selects DDEC6 (the default); pass ``"bader"`` or
+    ``"cm5"`` (charges only) to select a different source.
     """
     samples = loadfn(local_path)
-    structures, energies, forces, stresses = _matpes_samples_to_lists(samples, stress_unit=stress_unit)
+    structures, labels = _matpes_samples_to_lists(
+        samples,
+        stress_unit=stress_unit,
+        include_charges=include_charges,
+        include_magmoms=include_magmoms,
+    )
 
     return _build_pes_dataset(
         structures,
-        {"energies": energies, "forces": forces, "stresses": stresses},
+        labels,
         cutoff=cutoff,
         element_types=element_types,
         save_cache=save_cache,
@@ -1042,6 +1186,8 @@ class MGLDatasetLoader:
         save_cache: bool = True,
         root: str | None = None,
         stress_unit: StressUnit = "kbar",
+        include_charges: bool | ChargesSource = False,
+        include_magmoms: bool | MagmomsSource = False,
     ) -> MGLDataset:
         """Download a MatPES JSON file from HF and build an ``MGLDataset``.
 
@@ -1061,6 +1207,22 @@ class MGLDatasetLoader:
                 ``"GPa"`` if the file is already in matgl convention, or
                 ``"eV/A3"`` for an eV/Å³ source (magnitude only — supply the
                 correct sign yourself).
+            include_charges: If truthy, copy per-atom partial charges into the
+                dataset's labels under the key ``"charges"``. ``True`` selects
+                DDEC6 net atomic charges (``ddec6.partial_charges``, from
+                Chargemol — the matgl default for QET-style training); pass
+                ``"bader"`` for Bader electron counts (``bader_charges``) or
+                ``"cm5"`` for CM5 (``cm5_partial_charges``). Samples whose
+                chosen source is ``None`` (calculation failed upstream) are
+                dropped — the dataset is silently shorter than the full
+                MatPES file. Required for QET-style training where
+                ``charge_weight > 0``.
+            include_magmoms: If truthy, copy per-atom magnetic moments into
+                the dataset's labels under ``"magmoms"``. ``True`` selects
+                DDEC6 spin moments (``ddec6.spin_moments``); pass ``"bader"``
+                for Bader magmoms (``bader_magmoms``). Same drop-on-missing
+                semantics as ``include_charges``. Required for CHGNet-style
+                training where ``magmom_weight > 0``.
 
         Returns:
             An ``MGLDataset`` ready to drop into ``MGLDataLoader``. The
@@ -1082,6 +1244,8 @@ class MGLDatasetLoader:
             save_cache=save_cache,
             root=root,
             stress_unit=stress_unit,
+            include_charges=include_charges,
+            include_magmoms=include_magmoms,
         )
 
     def matpes_element_refs(
@@ -1159,6 +1323,9 @@ class MGLPotentialTrainer:
         charge_weight: float = 0.0,
         loss: str = "huber_loss",
         loss_params: dict | None = None,
+        # Target normalisation (forwarded to PotentialLightningModule).
+        data_mean: float | torch.Tensor = 0.0,
+        data_std: float | torch.Tensor = 1.0,
         # Optimizer / scheduler defaults.
         lr: float = 1e-3,
         decay_steps: int = 1000,
@@ -1198,6 +1365,15 @@ class MGLPotentialTrainer:
                 ``"smooth_l1_loss"``, or ``"l1_loss"``.
             loss_params: Optional kwargs forwarded to the loss function (e.g.
                 ``{"delta": 0.1}`` for Huber).
+            data_mean: Per-atom energy mean used by the inner ``Potential`` to
+                rescale predictions before the loss is computed. Forwarded to
+                :class:`PotentialLightningModule`. Default ``0.0``.
+            data_std: Per-atom energy / force scale used by the inner
+                ``Potential`` to rescale predictions before the loss is
+                computed. Typical recipe for foundation-potential training:
+                pass the RMS of all force components in the training set so
+                forces and energies share an order of magnitude. Default
+                ``1.0``.
             lr: Initial learning rate.
             decay_steps: ``CosineAnnealingLR`` ``T_max``.
             decay_alpha: Minimum-LR multiplier (``eta_min = lr * decay_alpha``).
@@ -1225,6 +1401,9 @@ class MGLPotentialTrainer:
         self.charge_weight = charge_weight
         self.loss = loss
         self.loss_params = loss_params
+
+        self.data_mean = data_mean
+        self.data_std = data_std
 
         self.lr = lr
         self.decay_steps = decay_steps
@@ -1300,6 +1479,7 @@ class MGLPotentialTrainer:
         *,
         atomrefs: np.ndarray | Any = None,
         save_path: str | Path | None = None,
+        ckpt_path: str | Path | None = None,
     ) -> Potential:
         """Run training end-to-end on a pre-built dataset.
 
@@ -1316,6 +1496,12 @@ class MGLPotentialTrainer:
                 ``MGLDatasetLoader().matpes_element_refs(...)`` (download from
                 HF) or :func:`fit_element_refs` (fit locally) to obtain one.
             save_path: If given, ``potential.save(save_path)`` after training.
+            ckpt_path: Forwarded to ``pl.Trainer.fit(ckpt_path=...)`` so a
+                previous run can be resumed. Accepts an explicit Lightning
+                checkpoint path or the string ``"last"`` to pick up the most
+                recent ``last.ckpt`` from the configured ``ModelCheckpoint``.
+                Optimizer / scheduler / epoch counter / RNG state are all
+                restored. ``None`` (default) starts fresh.
 
         Returns:
             The trained :class:`~matgl.apps.pes.Potential`. Also reachable as
@@ -1346,6 +1532,8 @@ class MGLPotentialTrainer:
             stress_weight=self.stress_weight,
             magmom_weight=self.magmom_weight,
             charge_weight=self.charge_weight,
+            data_mean=self.data_mean,
+            data_std=self.data_std,
             loss=self.loss,
             loss_params=self.loss_params,
             lr=self.lr,
@@ -1359,7 +1547,12 @@ class MGLPotentialTrainer:
             inference_mode=False,
             **self.trainer_kwargs,
         )
-        self.trainer.fit(model=self.lit_module, train_dataloaders=train_loader, val_dataloaders=val_loader)
+        self.trainer.fit(
+            model=self.lit_module,
+            train_dataloaders=train_loader,
+            val_dataloaders=val_loader,
+            ckpt_path=str(ckpt_path) if ckpt_path is not None else None,
+        )
         self.trainer.test(self.lit_module, dataloaders=test_loader)
 
         self.potential = self.lit_module.model

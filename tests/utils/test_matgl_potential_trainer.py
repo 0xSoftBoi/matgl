@@ -454,3 +454,370 @@ def test_matpes_payload_is_loadable_without_gzip_suffix(tmp_path, monkeypatch):
         version="r2SCAN-2025.2", cutoff=4.0, save_cache=False, root=str(tmp_path / "ds")
     )
     assert set(ds.labels.keys()) == {"energies", "forces", "stresses"}
+
+
+# ---------------------------------------------------------------------------
+# include_charges / include_magmoms toggles on MatPES loading.
+# ---------------------------------------------------------------------------
+
+
+def _write_matpes_payload_with_optional(
+    path: pathlib.Path,
+    *,
+    with_charges: bool = False,
+    with_magmoms: bool = False,
+    with_ddec6: bool = False,
+    with_cm5: bool = False,
+) -> None:
+    """Write a small NaCl MatPES-shaped JSON with optional per-atom fields.
+
+    Three samples; the first has the optional fields populated, the second has
+    ``None`` for the requested field(s) (so it should be dropped when the
+    matching ``include_*`` flag is set), and the third has them populated.
+    """
+    with gzip.open(_NACL_PARITY) as fh:
+        wrapped = json.load(fh)
+    base = wrapped["samples"][:3]
+    enriched: list[dict] = []
+    for idx, raw in enumerate(base):
+        sample = dict(raw)
+        natoms = len(sample["forces"])
+        if with_charges:
+            sample["bader_charges"] = None if idx == 1 else [1.0 + 0.1 * j for j in range(natoms)]
+        if with_magmoms:
+            sample["bader_magmoms"] = None if idx == 1 else [0.0 for _ in range(natoms)]
+        if with_ddec6:
+            sample["ddec6"] = (
+                None
+                if idx == 1
+                else {
+                    "partial_charges": [0.5 + 0.1 * j for j in range(natoms)],
+                    "spin_moments": [0.01 * j for j in range(natoms)],
+                }
+            )
+        if with_cm5:
+            sample["cm5_partial_charges"] = None if idx == 1 else [-0.001 * j for j in range(natoms)]
+        enriched.append(sample)
+    path.write_text(json.dumps(enriched))
+
+
+@pytest.mark.skipif(not _NACL_PARITY.exists(), reason="NaCl parity payload missing")
+class TestMatpesIncludeOptional:
+    def test_include_charges_true_defaults_to_ddec6(self, monkeypatch, tmp_path):
+        """``include_charges=True`` resolves to DDEC6 — the matgl default."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_ddec6=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_charges=True,
+            )
+        assert "charges" in ds.labels
+        assert len(ds.labels["energies"]) == 2  # one sample dropped
+        first = ds.labels["charges"][0]
+        natoms = len(first)
+        # DDEC6 partial_charges were written as [0.5 + 0.1*j for j in range(natoms)].
+        np.testing.assert_allclose(first, [0.5 + 0.1 * j for j in range(natoms)])
+
+    def test_include_charges_bader_adds_label_and_drops_missing(self, monkeypatch, tmp_path):
+        """``include_charges='bader'`` reads ``bader_charges`` explicitly."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_charges=True, with_magmoms=False)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_charges="bader",
+            )
+        assert "charges" in ds.labels
+        assert len(ds.labels["energies"]) == 2  # third sample with None dropped
+        assert len(ds.labels["charges"]) == 2
+
+    def test_include_magmoms_true_defaults_to_ddec6(self, monkeypatch, tmp_path):
+        """``include_magmoms=True`` resolves to DDEC6 — the matgl default."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_ddec6=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_magmoms=True,
+            )
+        assert "magmoms" in ds.labels
+        first = ds.labels["magmoms"][0]
+        natoms = len(first)
+        # DDEC6 spin_moments were written as [0.01*j for j in range(natoms)].
+        np.testing.assert_allclose(first, [0.01 * j for j in range(natoms)])
+
+    def test_include_magmoms_bader_adds_label(self, monkeypatch, tmp_path):
+        """``include_magmoms='bader'`` reads ``bader_magmoms`` explicitly."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_charges=False, with_magmoms=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_magmoms="bader",
+            )
+        assert "magmoms" in ds.labels
+        assert len(ds.labels["magmoms"]) == 2
+
+    def test_optional_off_leaves_label_set_unchanged(self, monkeypatch, tmp_path):
+        """Default ``include_*=False`` keeps the legacy {energies, forces, stresses} schema."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_charges=True, with_magmoms=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        ds = MGLDatasetLoader().matpes_dataset(
+            version="r2SCAN-2025.2",
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+        )
+        assert set(ds.labels.keys()) == {"energies", "forces", "stresses"}
+
+    def test_include_charges_ddec6_selects_partial_charges(self, monkeypatch, tmp_path):
+        """``include_charges='ddec6'`` reads ``ddec6.partial_charges``."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_ddec6=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_charges="ddec6",
+            )
+        assert "charges" in ds.labels
+        assert len(ds.labels["charges"]) == 2
+        first = ds.labels["charges"][0]
+        natoms = len(first)
+        # DDEC6 values were written as [0.5 + 0.1*j for j in range(natoms)].
+        np.testing.assert_allclose(first, [0.5 + 0.1 * j for j in range(natoms)])
+
+    def test_include_charges_cm5_selects_partial_charges(self, monkeypatch, tmp_path):
+        """``include_charges='cm5'`` reads top-level ``cm5_partial_charges``."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_cm5=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_charges="cm5",
+            )
+        assert "charges" in ds.labels
+        first = ds.labels["charges"][0]
+        natoms = len(first)
+        np.testing.assert_allclose(first, [-0.001 * j for j in range(natoms)])
+
+    def test_include_magmoms_ddec6_selects_spin_moments(self, monkeypatch, tmp_path):
+        """``include_magmoms='ddec6'`` reads ``ddec6.spin_moments``."""
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_ddec6=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.warns(UserWarning, match="Dropped 1 MatPES samples"):
+            ds = MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_magmoms="ddec6",
+            )
+        assert "magmoms" in ds.labels
+        first = ds.labels["magmoms"][0]
+        natoms = len(first)
+        np.testing.assert_allclose(first, [0.01 * j for j in range(natoms)])
+
+    def test_unknown_charges_source_raises(self, monkeypatch, tmp_path):
+        flat = tmp_path / "MatPES-R2SCAN-2025.2.json"
+        _write_matpes_payload_with_optional(flat, with_charges=True)
+        monkeypatch.setattr(training_mod, "hf_hub_download", lambda **_: str(flat))
+        monkeypatch.setattr(training_mod, "try_to_load_from_cache", lambda **_: None)
+
+        with pytest.raises(ValueError, match="Unknown charges source"):
+            MGLDatasetLoader().matpes_dataset(
+                version="r2SCAN-2025.2",
+                cutoff=4.0,
+                save_cache=False,
+                root=str(tmp_path / "ds"),
+                stress_unit="GPa",
+                include_charges="hirshfeld",  # type: ignore[arg-type]
+            )
+
+
+# ---------------------------------------------------------------------------
+# data_mean / data_std / ckpt_path plumbing on MGLPotentialTrainer.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _NACL_PARITY.exists(), reason="NaCl parity payload missing")
+class TestTrainerPlumbing:
+    def _make_model(self, element_types):
+        return TensorNet(
+            element_types=tuple(element_types),
+            cutoff=4.0,
+            is_intensive=False,
+            use_warp=False,
+            units=8,
+            ntargets=1,
+            num_layers=1,
+        )
+
+    def _ds(self, monkeypatch, tmp_path):
+        _patch_hf_dataset_download(monkeypatch, tmp_path)
+        return MGLDatasetLoader().matpes_dataset(
+            version="r2SCAN-2025.2",
+            cutoff=4.0,
+            save_cache=False,
+            root=str(tmp_path / "ds"),
+            stress_unit="GPa",
+        )
+
+    def test_data_mean_std_stored_and_forwarded(self, monkeypatch, tmp_path):
+        """``data_mean`` / ``data_std`` reach the Lightning module's buffers."""
+        ds = self._ds(monkeypatch, tmp_path)
+        model = self._make_model(ds.element_types)
+        trainer = MGLPotentialTrainer(
+            model,
+            batch_size=2,
+            max_epochs=1,
+            accelerator="cpu",
+            devices=1,
+            seed=42,
+            data_mean=0.5,
+            data_std=2.5,
+            loader_kwargs={"num_workers": 0, "frac_list": (0.6, 0.2, 0.2)},
+            trainer_kwargs={
+                "logger": False,
+                "enable_checkpointing": False,
+                "enable_progress_bar": False,
+                "enable_model_summary": False,
+                "num_sanity_val_steps": 0,
+                "limit_train_batches": 1,
+                "limit_val_batches": 1,
+                "limit_test_batches": 1,
+            },
+        )
+        assert trainer.data_mean == 0.5
+        assert trainer.data_std == 2.5
+
+        trainer.fit(dataset=ds, atomrefs=None)
+        assert trainer.lit_module is not None
+        np.testing.assert_allclose(trainer.lit_module.data_mean.detach().cpu().item(), 0.5)
+        np.testing.assert_allclose(trainer.lit_module.data_std.detach().cpu().item(), 2.5)
+
+    def test_data_mean_std_defaults_passthrough_when_unset(self, monkeypatch, tmp_path):
+        ds = self._ds(monkeypatch, tmp_path)
+        model = self._make_model(ds.element_types)
+        trainer = MGLPotentialTrainer(model, accelerator="cpu", devices=1)
+        assert trainer.data_mean == 0.0
+        assert trainer.data_std == 1.0
+
+    def test_fit_accepts_ckpt_path_and_forwards_to_pl_trainer(self, monkeypatch, tmp_path):
+        """``fit(ckpt_path=...)`` is forwarded to ``pl.Trainer.fit`` for resume."""
+        ds = self._ds(monkeypatch, tmp_path)
+        model = self._make_model(ds.element_types)
+        trainer = MGLPotentialTrainer(
+            model,
+            batch_size=2,
+            max_epochs=1,
+            accelerator="cpu",
+            devices=1,
+            seed=42,
+            loader_kwargs={"num_workers": 0, "frac_list": (0.6, 0.2, 0.2)},
+            trainer_kwargs={
+                "logger": False,
+                "enable_progress_bar": False,
+                "enable_model_summary": False,
+                "num_sanity_val_steps": 0,
+                "limit_train_batches": 1,
+                "limit_val_batches": 1,
+                "limit_test_batches": 1,
+                "default_root_dir": str(tmp_path / "lightning"),
+            },
+        )
+
+        captured: dict = {}
+        import lightning as pl
+
+        real_fit = pl.Trainer.fit
+
+        def spy_fit(self, *args, **kwargs):
+            captured["ckpt_path"] = kwargs.get("ckpt_path")
+            return real_fit(self, *args, **kwargs)
+
+        monkeypatch.setattr(pl.Trainer, "fit", spy_fit)
+        trainer.fit(dataset=ds, atomrefs=None)
+        assert captured["ckpt_path"] is None
+
+        # Now resume from the produced last.ckpt to prove the path is forwarded.
+        ckpt = tmp_path / "fake_last.ckpt"
+        # The Lightning trainer wrote a checkpoint under default_root_dir on
+        # train end; locate any *.ckpt under that tree.
+        ckpts = list(pathlib.Path(tmp_path / "lightning").rglob("*.ckpt"))
+        if not ckpts:
+            pytest.skip("Lightning did not produce a checkpoint to resume from")
+        ckpt = ckpts[0]
+
+        captured.clear()
+        trainer2 = MGLPotentialTrainer(
+            self._make_model(ds.element_types),
+            batch_size=2,
+            max_epochs=2,  # one extra epoch
+            accelerator="cpu",
+            devices=1,
+            seed=42,
+            loader_kwargs={"num_workers": 0, "frac_list": (0.6, 0.2, 0.2)},
+            trainer_kwargs={
+                "logger": False,
+                "enable_checkpointing": False,
+                "enable_progress_bar": False,
+                "enable_model_summary": False,
+                "num_sanity_val_steps": 0,
+                "limit_train_batches": 1,
+                "limit_val_batches": 1,
+                "limit_test_batches": 1,
+            },
+        )
+        trainer2.fit(dataset=ds, atomrefs=None, ckpt_path=ckpt)
+        assert captured["ckpt_path"] == str(ckpt)
