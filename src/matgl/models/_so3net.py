@@ -36,7 +36,7 @@ from ._core import MatGLModel
 if TYPE_CHECKING:
     from matgl.graph._converters_dgl import GraphConverter
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class SO3Net(MatGLModel):

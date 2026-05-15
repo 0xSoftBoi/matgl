@@ -71,6 +71,20 @@ class MatglLightningModuleMixin:
         sch = self.lr_schedulers()  # type: ignore[attr-defined]
         sch.step()
 
+    def optimizer_zero_grad(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: torch.optim.Optimizer,
+    ) -> None:
+        """Zero gradients with ``set_to_none=True`` to free memory and skip the zero kernel.
+
+        Lightning's default already forwards to PyTorch's default
+        (``set_to_none=True`` since PyTorch 1.7), but we override here to make the
+        intent explicit and survive any upstream default change.
+        """
+        optimizer.zero_grad(set_to_none=True)
+
     def validation_step(self, batch: tuple, batch_idx: int) -> Any:
         """Validation step.
 

@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from matgl.graph._converters_pyg import GraphConverter
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class MEGNet(MatGLModel):

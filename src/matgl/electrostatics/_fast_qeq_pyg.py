@@ -9,6 +9,12 @@ from torch import nn
 
 from matgl.utils.maths import scatter_add
 
+# Lower bound applied to ``sum_j eta_j^{-1}`` before dividing. Guards against
+# inf/nan when an entire graph in the batch has near-zero inverse hardness
+# (degenerate atom types or an unhealthy training step). Chosen well below any
+# physical inverse-hardness scale but large enough to avoid float32 underflow.
+_QEQ_DENOM_EPS = 1e-12
+
 
 class LinearQeq(nn.Module):
     r"""Charge equilibrium within batches of structures (PyG backend).
@@ -84,4 +90,6 @@ class LinearQeq(nn.Module):
         sum_chi_hardness_inv = scatter_add(chi_hardness_inv, batch, dim_size=num_graphs)[batch]
         sum_q = total_charge_graph[batch]
 
+        # Clamp the denominator to avoid silent inf/nan for degenerate batches.
+        sum_hardness_inv = sum_hardness_inv.clamp_min(_QEQ_DENOM_EPS)
         return -chi * hardness_inv + hardness_inv * (sum_q + sum_chi_hardness_inv) / sum_hardness_inv

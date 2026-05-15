@@ -36,6 +36,23 @@ int_th = torch.int32
 # trip a circular import.
 from .utils.training import MGLDatasetLoader, MGLPotentialTrainer  # noqa: E402
 
+__all__ = [
+    "MGLDatasetLoader",
+    "MGLPotentialTrainer",
+    "__version__",
+    "clear_cache",
+    "ensure_backend",
+    "float_np",
+    "float_th",
+    "get_available_pretrained_models",
+    "get_best_device",
+    "int_np",
+    "int_th",
+    "load_model",
+    "set_backend",
+    "set_default_dtype",
+]
+
 
 def set_default_dtype(type_: str = "float", size: int = 32) -> None:
     """Set the default dtype size (16, 32 or 64) for int or float used throughout matgl.

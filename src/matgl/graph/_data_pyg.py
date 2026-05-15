@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import shutil
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -20,6 +23,46 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from matgl.graph.converters import GraphConverter
+
+logger = logging.getLogger(__name__)
+
+# Bump this when the on-disk format changes in a backwards-incompatible way so
+# old caches are invalidated automatically (a stricter version of the cutoff
+# fingerprint below).
+_CACHE_FORMAT_VERSION = 1
+
+
+def _compute_cache_fingerprint(
+    converter: GraphConverter | None,
+    include_line_graph: bool,
+    include_ref_charge: bool,
+) -> dict[str, object]:
+    """Build a small, JSON-serializable fingerprint of the active dataset config.
+
+    Stored alongside processed graphs so that ``has_cache`` can detect a
+    config drift (changed cutoff, different element list, swapped converter
+    class) and trigger reprocessing rather than silently returning stale data.
+    """
+    if converter is None:
+        converter_class = None
+        cutoff: float | None = None
+        element_hash: str | None = None
+    else:
+        converter_class = type(converter).__name__
+        cutoff = float(getattr(converter, "cutoff", float("nan")))
+        element_types = getattr(converter, "element_types", None)
+        if element_types is None:
+            element_hash = None
+        else:
+            element_hash = hashlib.sha1("|".join(map(str, element_types)).encode("utf-8")).hexdigest()[:16]
+    return {
+        "format_version": _CACHE_FORMAT_VERSION,
+        "converter_class": converter_class,
+        "cutoff": cutoff,
+        "element_hash": element_hash,
+        "include_line_graph": include_line_graph,
+        "include_ref_charge": include_ref_charge,
+    }
 
 
 def _default_loader_kwargs(user_kwargs: dict) -> dict:
@@ -278,6 +321,7 @@ class MGLDataset(Dataset):
         self.filename_line_graph = filename_line_graph
         self.filename_state_attr = filename_state_attr
         self.filename_labels = filename_labels
+        self.filename_fingerprint = "fingerprint.json"
         self.include_line_graph = include_line_graph
         self.include_ref_charge = include_ref_charge
         self.converter = converter
@@ -297,17 +341,59 @@ class MGLDataset(Dataset):
         if self.has_cache():
             self.load()
 
-        shutil.rmtree(self.root + "/processed/")
+        shutil.rmtree(Path(self.root) / "processed")
 
     def has_cache(self) -> bool:
-        """Check if the processed files exist."""
+        """Check if the processed files exist and match the current converter config.
+
+        When a ``converter`` is supplied, the stored fingerprint must match the
+        active config (cutoff, element list, converter class, line-graph /
+        ref-charge flags). A drift returns False so we reprocess rather than
+        silently loading stale graphs.
+
+        The "load-only" flow (no ``converter``, no ``structures``) intentionally
+        skips the equality check: the caller is explicitly pointing at a
+        pre-built cache directory and saying "load it." We only require the
+        four data files to exist in that case.
+        """
+        root = Path(self.root)
         files_to_check = [
             self.filename,
             self.filename_lattice,
             self.filename_state_attr,
             self.filename_labels,
         ]
-        return all(os.path.exists(os.path.join(self.root, f)) for f in files_to_check)
+        if not all((root / f).exists() for f in files_to_check):
+            return False
+
+        # Load-only flow: trust the existing cache when the user did not pass a
+        # converter (and thus has nothing to reprocess from anyway).
+        if self.converter is None:
+            return True
+
+        expected = _compute_cache_fingerprint(self.converter, self.include_line_graph, self.include_ref_charge)
+        fingerprint_path = root / self.filename_fingerprint
+        if not fingerprint_path.exists():
+            logger.warning(
+                "MGLDataset cache at %s has no fingerprint; reprocessing to avoid stale graphs.",
+                self.root,
+            )
+            return False
+        try:
+            stored = json.loads(fingerprint_path.read_text())
+        except (json.JSONDecodeError, OSError) as err:
+            logger.warning("Unreadable MGLDataset cache fingerprint at %s (%s); reprocessing.", fingerprint_path, err)
+            return False
+        if stored != expected:
+            logger.warning(
+                "MGLDataset cache at %s was built with a different converter config "
+                "(stored=%s, expected=%s); reprocessing.",
+                self.root,
+                stored,
+                expected,
+            )
+            return False
+        return True
 
     def process(self) -> None:
         """Convert Pymatgen structures into PyG Data objects."""
@@ -351,27 +437,33 @@ class MGLDataset(Dataset):
             self.save()
 
     def save(self) -> None:
-        """Save PyG graphs and labels to processed_dir."""
+        """Save PyG graphs, labels, and a cache fingerprint to processed_dir."""
         if not self.save_cache:
             return
 
-        if not os.path.exists(self.root):
-            os.makedirs(self.root)
+        root = Path(self.root)
+        root.mkdir(parents=True, exist_ok=True)
 
         if self.labels:
-            with open(os.path.join(self.root, self.filename_labels), "w") as file:
+            with (root / self.filename_labels).open("w") as file:
                 json.dump(self.labels, file)
 
-        torch.save(self.graphs, os.path.join(self.root, self.filename))
-        torch.save(self.lattices, os.path.join(self.root, self.filename_lattice))
-        torch.save(self.state_attr, os.path.join(self.root, self.filename_state_attr))
+        torch.save(self.graphs, root / self.filename)
+        torch.save(self.lattices, root / self.filename_lattice)
+        torch.save(self.state_attr, root / self.filename_state_attr)
+
+        # Write the fingerprint last so a partial cache (e.g. crash mid-save)
+        # is detected as stale on the next run.
+        fingerprint = _compute_cache_fingerprint(self.converter, self.include_line_graph, self.include_ref_charge)
+        (root / self.filename_fingerprint).write_text(json.dumps(fingerprint, indent=2, sort_keys=True))
 
     def load(self) -> None:
         """Load PyG graphs from files."""
-        self.graphs = torch.load(os.path.join(self.root, self.filename), weights_only=False)
-        self.lattices = torch.load(os.path.join(self.root, self.filename_lattice), weights_only=False)
-        self.state_attr = torch.load(os.path.join(self.root, self.filename_state_attr), weights_only=False)
-        with open(os.path.join(self.root, self.filename_labels)) as f:
+        root = Path(self.root)
+        self.graphs = torch.load(root / self.filename, weights_only=False)
+        self.lattices = torch.load(root / self.filename_lattice, weights_only=False)
+        self.state_attr = torch.load(root / self.filename_state_attr, weights_only=False)
+        with (root / self.filename_labels).open() as f:
             self.labels = json.load(f)
 
     def __getitem__(self, idx: int) -> tuple:

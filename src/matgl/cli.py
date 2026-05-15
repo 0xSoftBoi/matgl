@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -15,7 +15,7 @@ from pymatgen.core.structure import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
 
 import matgl
-from matgl.ext._ase_dgl import MolecularDynamics, Relaxer
+from matgl.ext.ase import MolecularDynamics, Relaxer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -76,8 +76,8 @@ def relax_structure(args: argparse.Namespace) -> int:
         final_structure = relax_results["final_structure"]
 
         if args.suffix:
-            basename, ext = os.path.splitext(fn)
-            outfn = f"{basename}{args.suffix}{ext}"
+            p = Path(fn)
+            outfn = f"{p.with_suffix('')}{args.suffix}{p.suffix}"
             final_structure.to(filename=outfn)
             print(f"Structure written to {outfn}!")
         elif args.outfile is not None:
@@ -309,7 +309,7 @@ def main():
         "-m",
         "--model",
         dest="model",
-        #        choices=[m for m in matgl.get_available_pretrained_models() if m.endswith("PES")],
+        choices=[m for m in matgl.get_available_pretrained_models() if m.endswith("PES")],
         default="M3GNet-MP-2021.2.8-DIRECT-PES",
         help="Path for loading MLIPs trained from MatGL. Default='M3GNet-MP-2021.2.8-DIRECT-PES'.",
     )
