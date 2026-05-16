@@ -29,8 +29,12 @@
 
 from __future__ import annotations
 
+import logging
+
 import torch
 import warp as wp
+
+logger = logging.getLogger(__name__)
 
 MODULES = {}
 
@@ -39,9 +43,7 @@ def get_module(name: str, dtype: list[str]):
     """Get the module for the given name and dtype."""
     full_name = name + "_" + "_".join(get_dtype(d) for d in dtype)
     if full_name not in MODULES:
-        print(f"Module {full_name} not found in MODULES dictionary")
-        print(f"Available modules: {list(MODULES.keys())}")
-        raise ValueError(f"Module {full_name} not found")
+        raise ValueError(f"Module {full_name} not found. Available modules: {list(MODULES.keys())}")
     return MODULES[full_name]
 
 
@@ -77,9 +79,7 @@ def get_wp_fp_dtype(dtype: str):
 
 def list_modules():
     """List all modules in the MODULES dictionary."""
-    print("Available modules:")
-    for name in MODULES:
-        print(f"  - {name}")
+    logger.info("Available modules: %s", list(MODULES.keys()))
     return list(MODULES.keys())
 
 

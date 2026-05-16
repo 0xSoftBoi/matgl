@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import inspect
 import json
 import logging
@@ -17,7 +18,7 @@ from huggingface_hub import HfApi, create_repo, hf_hub_download
 
 from matgl.config import MATGL_CACHE
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 # Files that comprise a serialized matgl model on disk and on Hugging Face Hub.
 _MODEL_FILES = ("model.pt", "state.pt", "model.json")
@@ -340,9 +341,8 @@ def load_model(path: str | Path, **kwargs):
             " please 'clear your cache by running `python -c 'import matgl; matgl.clear_cache()'`"
         ) from ex
     except BaseException as ex:
-        import traceback
-
-        traceback.print_exc()
+        # The chained ``from ex`` already carries the original traceback to the
+        # caller; no need for a redundant ``traceback.print_exc()`` to stderr.
         raise RuntimeError(
             "Unknown error occurred while loading model. Please review the traceback for more information."
         ) from ex
@@ -388,9 +388,31 @@ def _get_file_paths(path: Path, str_path: str | None = None, **kwargs):
         try:
             return _download_from_hf_hub(hf_repo_id, **kwargs)
         except Exception as err:
-            raise ValueError(f"No valid model found locally or at Hugging Face repo '{hf_repo_id}'.") from err
+            raise ValueError(_format_unknown_model_message(str_path, hf_repo_id=hf_repo_id)) from err
 
-    raise ValueError(f"No valid model found locally or at Hugging Face Hub for identifier '{str_path}'.")
+    raise ValueError(_format_unknown_model_message(str_path))
+
+
+def _format_unknown_model_message(identifier: str, *, hf_repo_id: str | None = None) -> str:
+    """Build a helpful 'model not found' message with nearest-match suggestion.
+
+    When the Hub is reachable, queries ``get_available_pretrained_models`` to build
+    a "Did you mean: ..." hint via ``difflib.get_close_matches``. When the Hub call
+    fails the candidate list is empty and the hint is simply omitted — there is no
+    static fallback because, with the Hub down, the user could not download the
+    model anyway.
+    """
+    candidates = get_available_pretrained_models()
+    suggestions = difflib.get_close_matches(identifier, candidates, n=3, cutoff=0.5)
+    parts = [
+        f"No valid model found locally or at Hugging Face repo '{hf_repo_id}'."
+        if hf_repo_id
+        else f"No valid model found locally or at Hugging Face Hub for identifier '{identifier}'.",
+    ]
+    if suggestions:
+        parts.append(f"Did you mean: {', '.join(suggestions)}?")
+    parts.append("Run `matgl.get_available_pretrained_models()` to list all available models.")
+    return " ".join(parts)
 
 
 def _download_from_hf_hub(
@@ -506,7 +528,9 @@ def get_available_pretrained_models() -> list[str]:
 
     Queries the official ``materialyze`` Hugging Face org and returns the bare model
     names (i.e. without the ``"materialyze/"`` prefix) so they can be passed directly
-    to ``load_model``.
+    to ``load_model``. Returns an empty list when the Hub is unreachable — there is
+    no point shipping a static fallback because, without Hub access, the user could
+    not download any of those models either.
 
     Returns:
         Sorted list of available model names.

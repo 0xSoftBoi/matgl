@@ -17,7 +17,7 @@ uv pip install -e ".[dgl]"         # add the optional DGL backend (Linux/macOS o
 
 DGL on macOS — DGL tests must run from a **separate virtualenv at `.venv_dgl/`** (gitignored).
 The pinned versions are taken from `README.md` and are required for any test that exercises DGL,
-i.e. `MATGL_BACKEND=DGL` or DGL-only models (CHGNet, M3GNet, MEGNet, SO3Net, QET):
+i.e. `MATGL_BACKEND=DGL` or DGL-only models (CHGNet, SO3Net):
 
 ```bash
 uv venv .venv_dgl                                       # one-time: create the DGL-only env
@@ -78,7 +78,7 @@ Docs/release helpers live in `tasks.py` (`invoke make-docs`, `invoke release <ve
 
 You will find paired private modules with `_dgl` / `_pyg` suffixes throughout the tree:
 
-- `matgl/models/_tensornet_{dgl,pyg}.py`, `_qet_dgl.py`, `_chgnet.py`, `_m3gnet.py`, `_megnet.py`, `_so3net.py` — only TensorNet currently has a PYG implementation; CHGNet, M3GNet, MEGNet, SO3Net, and QET are DGL-only.
+- `matgl/models/_tensornet_{dgl,pyg}.py`, `_qet_{dgl,pyg}.py`, `_m3gnet_{dgl,pyg}.py`, `_megnet_{dgl,pyg}.py`, `_chgnet.py`, `_so3net.py`, `_grace.py` — TensorNet, QET, M3GNet, and MEGNet have both DGL and PYG implementations; CHGNet and SO3Net are DGL-only; GRACE is PYG-only.
 - `matgl/graph/_compute_{dgl,pyg}.py`, `_converters_{dgl,pyg}.py`, `_data_{dgl,pyg}.py` — graph build / dataset code is duplicated per backend.
 - `matgl/ext/_pymatgen_{dgl,pyg}.py`, `_ase_{dgl,pyg}.py` — pymatgen/ASE adaptors are also backend-split.
 - `matgl/layers/_*_{dgl,pyg}.py`, `matgl/utils/_training_{dgl,pyg}.py`, `matgl/apps/_pes_{dgl,pyg}.py` — same pattern.
@@ -91,12 +91,12 @@ Modules prefixed with `_` are private. Public names are re-exported from each su
 
 ### Subpackage roles
 
-- `matgl.models` — graph-network architectures (M3GNet, MEGNet, CHGNet, TensorNet, SO3Net, QET) plus `TransformedTargetModel` wrapper.
+- `matgl.models` — graph-network architectures (M3GNet, MEGNet, CHGNet, TensorNet, SO3Net, QET, GRACE) plus `TransformedTargetModel` wrapper.
 - `matgl.layers` — building blocks (embeddings, graph conv, readout, ZBL, atom-ref, basis functions, activations).
 - `matgl.apps.pes.Potential` — wraps a graph model into an interatomic potential that returns energies/forces/stresses via autograd. PES wrappers are backend-specific (`_pes_dgl.py`, `_pes_pyg.py`).
 - `matgl.graph` — graph construction and `MGLDataset` / data loaders.
 - `matgl.ext` — external-library adaptors (`pymatgen` for `Structure`/`Molecule` → graph, `ase` for `Relaxer` / `MolecularDynamics` calculators, `alchmtk` for NVIDIA Alchemi toolkit ops).
-- `matgl.electrostatics` — DGL-only fast charge-equilibration utilities used by QET.
+- `matgl.electrostatics` — fast charge-equilibration and Gaussian-smeared Coulomb electrostatic potential utilities used by QET; split into `_fast_qeq_{dgl,pyg}.py` and `_elec_pot_{dgl,pyg}.py`.
 - `matgl.kernels` / `matgl.ops` — NVIDIA Warp GPU kernels and their pure-PyTorch reference ops; per-file ignores in `pyproject.toml` skip docstring/lint rules here.
 - `matgl.utils` — `IOMixIn` (model save/load + HF Hub), training loops (`_training_{dgl,pyg}.py`), spherical harmonics, math helpers, cutoff functions.
 

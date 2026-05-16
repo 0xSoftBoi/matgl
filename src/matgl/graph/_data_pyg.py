@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import shutil
+from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -19,6 +23,46 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from matgl.graph.converters import GraphConverter
+
+logger = logging.getLogger(__name__)
+
+# Bump this when the on-disk format changes in a backwards-incompatible way so
+# old caches are invalidated automatically (a stricter version of the cutoff
+# fingerprint below).
+_CACHE_FORMAT_VERSION = 1
+
+
+def _compute_cache_fingerprint(
+    converter: GraphConverter | None,
+    include_line_graph: bool,
+    include_ref_charge: bool,
+) -> dict[str, object]:
+    """Build a small, JSON-serializable fingerprint of the active dataset config.
+
+    Stored alongside processed graphs so that ``has_cache`` can detect a
+    config drift (changed cutoff, different element list, swapped converter
+    class) and trigger reprocessing rather than silently returning stale data.
+    """
+    if converter is None:
+        converter_class = None
+        cutoff: float | None = None
+        element_hash: str | None = None
+    else:
+        converter_class = type(converter).__name__
+        cutoff = float(getattr(converter, "cutoff", float("nan")))
+        element_types = getattr(converter, "element_types", None)
+        if element_types is None:
+            element_hash = None
+        else:
+            element_hash = hashlib.sha1("|".join(map(str, element_types)).encode("utf-8")).hexdigest()[:16]
+    return {
+        "format_version": _CACHE_FORMAT_VERSION,
+        "converter_class": converter_class,
+        "cutoff": cutoff,
+        "element_hash": element_hash,
+        "include_line_graph": include_line_graph,
+        "include_ref_charge": include_ref_charge,
+    }
 
 
 def _default_loader_kwargs(user_kwargs: dict) -> dict:
@@ -155,10 +199,34 @@ def collate_fn_pes(
     return g, lat.squeeze(), state_attr, e, f, s
 
 
+def _pick_collate_fn(labels: dict) -> Callable:
+    """Pick the right collate function from a dataset's label keys.
+
+    The two collate functions return different tuple shapes, so the choice has
+    to match the labels actually present in the dataset. Logic:
+
+    - No ``forces`` -> generic property-prediction (``collate_fn_graph``).
+    - PES with ``forces`` -> ``collate_fn_pes`` with stress/magmom/charge flags
+      enabled based on which optional keys are present.
+
+    ``magmoms`` and ``charges`` are mutually exclusive in ``collate_fn_pes``'s
+    return shape; we prefer ``magmoms`` when both happen to be present
+    (matching the DGL precedence) and document the override path.
+    """
+    if "forces" not in labels:
+        return collate_fn_graph
+    include_stress = "stresses" in labels
+    if "magmoms" in labels:
+        return partial(collate_fn_pes, include_stress=include_stress, include_magmom=True)
+    if "charges" in labels:
+        return partial(collate_fn_pes, include_stress=include_stress, include_charge=True)
+    return partial(collate_fn_pes, include_stress=include_stress)
+
+
 def MGLDataLoader(
     train_data: MGLDataset,
     val_data: MGLDataset,
-    collate_fn: Callable,
+    collate_fn: Callable | None = None,
     test_data: MGLDataset | None = None,
     **kwargs,
 ) -> tuple[DataLoader, ...]:
@@ -167,7 +235,12 @@ def MGLDataLoader(
     Args:
         train_data (Dataset): Training dataset (PyG Dataset or subset).
         val_data (Dataset): Validation dataset (PyG Dataset or subset).
-        collate_fn (Callable, optional): Collate function for batching.
+        collate_fn (Callable, optional): Collate function for batching. When ``None`` (default),
+            one is auto-selected from the training dataset's label keys: ``collate_fn_graph`` for
+            single-target property prediction (no ``forces`` key), or ``collate_fn_pes`` with
+            stress / magmom / charge flags toggled on based on the keys actually present. Pass
+            an explicit callable (e.g. ``partial(collate_fn_pes, include_stress=False)``) to
+            override.
         test_data (Dataset, optional): Test dataset (PyG Dataset or subset). Defaults to None.
         **kwargs: Pass-through kwargs to torch_geometric.loader.DataLoader. Common ones you may want to set are
             batch_size, num_workers, pin_memory, and generator.
@@ -182,6 +255,12 @@ def MGLDataLoader(
         ``num_workers > 0`` so the pool isn't torn down between epochs). Pass
         them explicitly to override.
     """
+    if collate_fn is None:
+        # Peel ``Subset`` (the common shape after ``split_dataset``) to reach
+        # the underlying ``MGLDataset`` whose ``labels`` drive the dispatch.
+        base = train_data.dataset if isinstance(train_data, Subset) else train_data
+        collate_fn = _pick_collate_fn(getattr(base, "labels", {}))
+
     kwargs = _default_loader_kwargs(kwargs)
     train_loader: DataLoader = DataLoader(train_data, shuffle=True, collate_fn=collate_fn, **kwargs)
     val_loader: DataLoader = DataLoader(val_data, shuffle=False, collate_fn=collate_fn, **kwargs)
@@ -242,6 +321,7 @@ class MGLDataset(Dataset):
         self.filename_line_graph = filename_line_graph
         self.filename_state_attr = filename_state_attr
         self.filename_labels = filename_labels
+        self.filename_fingerprint = "fingerprint.json"
         self.include_line_graph = include_line_graph
         self.include_ref_charge = include_ref_charge
         self.converter = converter
@@ -261,17 +341,59 @@ class MGLDataset(Dataset):
         if self.has_cache():
             self.load()
 
-        shutil.rmtree(self.root + "/processed/")
+        shutil.rmtree(Path(self.root) / "processed")
 
     def has_cache(self) -> bool:
-        """Check if the processed files exist."""
+        """Check if the processed files exist and match the current converter config.
+
+        When a ``converter`` is supplied, the stored fingerprint must match the
+        active config (cutoff, element list, converter class, line-graph /
+        ref-charge flags). A drift returns False so we reprocess rather than
+        silently loading stale graphs.
+
+        The "load-only" flow (no ``converter``, no ``structures``) intentionally
+        skips the equality check: the caller is explicitly pointing at a
+        pre-built cache directory and saying "load it." We only require the
+        four data files to exist in that case.
+        """
+        root = Path(self.root)
         files_to_check = [
             self.filename,
             self.filename_lattice,
             self.filename_state_attr,
             self.filename_labels,
         ]
-        return all(os.path.exists(os.path.join(self.root, f)) for f in files_to_check)
+        if not all((root / f).exists() for f in files_to_check):
+            return False
+
+        # Load-only flow: trust the existing cache when the user did not pass a
+        # converter (and thus has nothing to reprocess from anyway).
+        if self.converter is None:
+            return True
+
+        expected = _compute_cache_fingerprint(self.converter, self.include_line_graph, self.include_ref_charge)
+        fingerprint_path = root / self.filename_fingerprint
+        if not fingerprint_path.exists():
+            logger.warning(
+                "MGLDataset cache at %s has no fingerprint; reprocessing to avoid stale graphs.",
+                self.root,
+            )
+            return False
+        try:
+            stored = json.loads(fingerprint_path.read_text())
+        except (json.JSONDecodeError, OSError) as err:
+            logger.warning("Unreadable MGLDataset cache fingerprint at %s (%s); reprocessing.", fingerprint_path, err)
+            return False
+        if stored != expected:
+            logger.warning(
+                "MGLDataset cache at %s was built with a different converter config "
+                "(stored=%s, expected=%s); reprocessing.",
+                self.root,
+                stored,
+                expected,
+            )
+            return False
+        return True
 
     def process(self) -> None:
         """Convert Pymatgen structures into PyG Data objects."""
@@ -315,27 +437,33 @@ class MGLDataset(Dataset):
             self.save()
 
     def save(self) -> None:
-        """Save PyG graphs and labels to processed_dir."""
+        """Save PyG graphs, labels, and a cache fingerprint to processed_dir."""
         if not self.save_cache:
             return
 
-        if not os.path.exists(self.root):
-            os.makedirs(self.root)
+        root = Path(self.root)
+        root.mkdir(parents=True, exist_ok=True)
 
         if self.labels:
-            with open(os.path.join(self.root, self.filename_labels), "w") as file:
+            with (root / self.filename_labels).open("w") as file:
                 json.dump(self.labels, file)
 
-        torch.save(self.graphs, os.path.join(self.root, self.filename))
-        torch.save(self.lattices, os.path.join(self.root, self.filename_lattice))
-        torch.save(self.state_attr, os.path.join(self.root, self.filename_state_attr))
+        torch.save(self.graphs, root / self.filename)
+        torch.save(self.lattices, root / self.filename_lattice)
+        torch.save(self.state_attr, root / self.filename_state_attr)
+
+        # Write the fingerprint last so a partial cache (e.g. crash mid-save)
+        # is detected as stale on the next run.
+        fingerprint = _compute_cache_fingerprint(self.converter, self.include_line_graph, self.include_ref_charge)
+        (root / self.filename_fingerprint).write_text(json.dumps(fingerprint, indent=2, sort_keys=True))
 
     def load(self) -> None:
         """Load PyG graphs from files."""
-        self.graphs = torch.load(os.path.join(self.root, self.filename), weights_only=False)
-        self.lattices = torch.load(os.path.join(self.root, self.filename_lattice), weights_only=False)
-        self.state_attr = torch.load(os.path.join(self.root, self.filename_state_attr), weights_only=False)
-        with open(os.path.join(self.root, self.filename_labels)) as f:
+        root = Path(self.root)
+        self.graphs = torch.load(root / self.filename, weights_only=False)
+        self.lattices = torch.load(root / self.filename_lattice, weights_only=False)
+        self.state_attr = torch.load(root / self.filename_state_attr, weights_only=False)
+        with (root / self.filename_labels).open() as f:
             self.labels = json.load(f)
 
     def __getitem__(self, idx: int) -> tuple:

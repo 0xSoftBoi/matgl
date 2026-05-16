@@ -230,6 +230,14 @@ class Potential(nn.Module, IOMixIn):
             Shapes: ``energies (B,)``, ``forces (N, 3)``, ``stresses (3*B, 3)``
             in GPa with compressive-negative sign, ``hessian (3*N, 3*N)``.
         """
+        if lat is None:
+            raise ValueError(
+                "Potential.forward requires a `lat` tensor (lattice in Cartesian frame, "
+                "shape (3, 3) or (B, 3, 3)). The PES path always needs a lattice to "
+                "compute pbc-aware positions and stress; pass an explicit identity or "
+                "the structure's lattice."
+            )
+
         # Shallow-clone the input graph so the in-place attribute assignments below
         # (``g.lattice`` / ``g.pbc_offshift`` / ``g.pos``) do not leak back to the
         # caller. PyG's ``Data.to(device)`` migrates tensors in place and returns

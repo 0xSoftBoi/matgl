@@ -30,7 +30,7 @@ from ._tensornet_dgl import TensorNet
 if TYPE_CHECKING:
     from matgl.graph.converters import GraphConverter
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class QET(TensorNet):

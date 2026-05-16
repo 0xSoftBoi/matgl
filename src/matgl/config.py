@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Literal
 
 from pymatgen.core.periodic_table import Element
+
+logger = logging.getLogger(__name__)
 
 # Coulomb conversion
 COULOMB_CONSTANT = 14.399645478425668
@@ -18,8 +21,8 @@ DEFAULT_ELEMENTS = tuple(el.symbol for el in Element if el.symbol not in ["Po", 
 
 
 # Default location of the cache for matgl, e.g., for storing downloaded models.
-MATGL_CACHE = Path(os.path.expanduser("~")) / ".cache/matgl"
-os.makedirs(MATGL_CACHE, exist_ok=True)
+MATGL_CACHE = Path.home() / ".cache" / "matgl"
+MATGL_CACHE.mkdir(parents=True, exist_ok=True)
 
 # Set the backend. Note that not all models are available for all backends.
 BACKEND: Literal["PYG", "DGL"] = os.environ.get("MATGL_BACKEND", "PYG").upper()  # type: ignore[assignment,return-value]
@@ -55,4 +58,4 @@ def clear_cache(confirm: bool = True) -> None:
         try:
             shutil.rmtree(MATGL_CACHE)
         except FileNotFoundError:
-            print(f"matgl cache dir {MATGL_CACHE!r} not found")
+            logger.warning("matgl cache dir %r not found", str(MATGL_CACHE))

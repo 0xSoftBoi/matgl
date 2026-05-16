@@ -53,7 +53,7 @@ jobs:
         run: uv venv --python ${{ matrix.config.python }} --clear
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dgl]" \
+          uv pip install -e "." \
               "numpy<2" \
               "torch==2.4.0" \
               "torchdata==0.8.0" \
