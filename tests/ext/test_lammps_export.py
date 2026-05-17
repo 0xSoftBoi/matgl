@@ -60,7 +60,7 @@ def _build_lammps_inputs(structure: Structure, element_types: tuple[str, ...], c
     return positions, edge_index, unit_shifts, cell, z_per_atom, local_or_ghost
 
 
-def _build_tensornet_potential() -> tuple[Potential, tuple[str, ...]]:
+def _build_tensornet_potential(rbf_type: str = "Gaussian") -> tuple[Potential, tuple[str, ...]]:
     torch.manual_seed(0)
     element_types = ("Mo", "S")
     model = TensorNet(
@@ -71,7 +71,11 @@ def _build_tensornet_potential() -> tuple[Potential, tuple[str, ...]]:
         num_rbf=8,
         cutoff=4.0,
         use_warp=False,
-        rbf_type="Gaussian",
+        rbf_type=rbf_type,
+        # SphericalBessel checkpoints (e.g. TensorNet-MatPES-r2SCAN) use the
+        # smooth basis; the non-smooth path relies on sympy-lambdified funcs
+        # that don't survive torch.jit.save.
+        use_smooth=rbf_type == "SphericalBessel",
     )
     refs = torch.tensor([-1.5, -2.25], dtype=matgl.float_th)
     pot = Potential(
@@ -116,11 +120,18 @@ def _build_m3gnet_potential() -> tuple[Potential, tuple[str, ...]]:
     return pot, element_types
 
 
-@pytest.fixture(params=["tensornet", "m3gnet"])
+@pytest.fixture(params=["tensornet_gaussian", "tensornet_sb", "m3gnet"])
 def tiny_potential(request):
-    """Tiny deterministic Potential, parametrized over supported architectures."""
-    if request.param == "tensornet":
-        return _build_tensornet_potential()
+    """Tiny deterministic Potential, parametrized over supported architectures.
+
+    ``tensornet_sb`` exercises the SphericalBessel-smooth bond expansion path,
+    which matches the pretrained ``TensorNet-MatPES-r2SCAN`` checkpoint and
+    requires the LAMMPS kernel's pure-tensor SBF adapter.
+    """
+    if request.param == "tensornet_gaussian":
+        return _build_tensornet_potential(rbf_type="Gaussian")
+    if request.param == "tensornet_sb":
+        return _build_tensornet_potential(rbf_type="SphericalBessel")
     return _build_m3gnet_potential()
 
 

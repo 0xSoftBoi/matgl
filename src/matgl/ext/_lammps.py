@@ -97,12 +97,58 @@ def _m3gnet_three_body_basis_torch(
     return (sbf * expanded_shf).reshape(-1, max_n * max_l)
 
 
+class _SmoothSBFExpansion(nn.Module):
+    """TorchScript-friendly stand-in for ``BondExpansion(rbf_type='SphericalBessel', smooth=True)``.
+
+    ``SphericalBesselFunction``'s forward dispatches through ``@torch.jit.ignore``
+    helpers (sympy-lambdified ``funcs`` list), which blocks ``torch.jit.save``.
+    The smooth-SBF basis it computes is mathematically identical to
+    :func:`matgl.layers._basis.spherical_bessel_smooth`, which is implemented in
+    pure tensor ops. This adapter is a drop-in replacement preserving the
+    ``(N, max_n)`` output shape.
+    """
+
+    # NOTE: no class-level annotations — under ``from __future__ import
+    # annotations`` TorchScript's annotation resolver treats them as
+    # unresolved string types and errors with "Unknown type annotation".
+    # ``__constants__`` makes scripting bake ``cutoff`` and ``max_n`` in as
+    # Python literals (their values never change after __init__).
+
+    __constants__ = ["cutoff", "max_n"]  # noqa: RUF012 — TorchScript convention.
+
+    def __init__(self, cutoff: float, max_n: int) -> None:
+        super().__init__()
+        self.cutoff = float(cutoff)
+        self.max_n = int(max_n)
+
+    def forward(self, r: Tensor) -> Tensor:
+        return spherical_bessel_smooth(r, cutoff=self.cutoff, max_n=self.max_n)
+
+
 class _TensorNetKernel(nn.Module):
     """Per-atom raw-energy compute for TensorNet (PyG, no-Warp)."""
 
     def __init__(self, model: nn.Module) -> None:
         super().__init__()
-        self.bond_expansion = model.bond_expansion
+        # Swap SphericalBessel bond_expansion for the pure-tensor equivalent so
+        # the kernel survives torch.jit.script.save. Gaussian / ExpNormal /
+        # RadialBessel basis modules are already TorchScript-friendly and pass
+        # through unchanged.
+        be = model.bond_expansion
+        if getattr(be, "rbf_type", None) == "SphericalBessel":
+            if not bool(be.rbf.smooth):
+                raise NotImplementedError(
+                    "LAMMPS export of TensorNet currently requires use_smooth=True "
+                    "for rbf_type='SphericalBessel' (non-smooth SphericalBesselFunction "
+                    "uses sympy-lambdified callables incompatible with torch.jit.script). "
+                    "Re-load the checkpoint with smooth=True."
+                )
+            self.bond_expansion: nn.Module = _SmoothSBFExpansion(
+                cutoff=float(be.cutoff),
+                max_n=int(be.rbf.max_n),
+            )
+        else:
+            self.bond_expansion = be
         self.tensor_embedding = model.tensor_embedding
         self.layers = model.layers
         self.out_norm = model.out_norm
@@ -251,8 +297,7 @@ class _M3GNetKernel(nn.Module):
                 1,  # num_graphs
             )
 
-        atomic = self.final_layer(node_feat).view(-1)
-        return atomic
+        return self.final_layer(node_feat).view(-1)
 
 
 class LAMMPSMatGLModel(nn.Module):
