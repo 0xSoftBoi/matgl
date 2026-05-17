@@ -134,7 +134,11 @@ class _TensorNetKernel(nn.Module):
         # the kernel survives torch.jit.script.save. Gaussian / ExpNormal /
         # RadialBessel basis modules are already TorchScript-friendly and pass
         # through unchanged.
-        be = model.bond_expansion
+        # ``model.bond_expansion`` typed as ``Tensor | Module`` via nn.Module's
+        # ``__getattr__``; the cast narrows it for mypy without runtime cost.
+        from typing import cast
+
+        be = cast("nn.Module", model.bond_expansion)
         if getattr(be, "rbf_type", None) == "SphericalBessel":
             if not bool(be.rbf.smooth):
                 raise NotImplementedError(
