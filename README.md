@@ -63,7 +63,6 @@ To use the remaining DGL-based models, you will need to install the DGL dependen
 takes about 10 minutes, depending on the speed of downloading the required GPU packages:
 
 ```bash
-pip install "numpy<2"
 pip install dgl==2.2.0
 pip install torch==2.3.0
 pip install "torchdata<=0.8.0"
@@ -413,7 +412,6 @@ for their contributions to warp-acceleration for TensorNet, which yielded ~2-3x 
 
 [m3gnetrepo]: https://github.com/materialyzeai/m3gnet "M3GNet repo"
 [megnetrepo]: https://github.com/materialyzeai/megnet "MEGNet repo"
-[dgl]: https://www.dgl.ai "DGL website"
 [materialyze]: http://materialyze.ai "Materialyze.AI website"
 [changelog]: https://matgl.ai/changes "Changelog"
 [graphnetwork]: https://arxiv.org/abs/1806.01261 "Deepmind's paper"
