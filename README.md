@@ -48,12 +48,6 @@ Major milestones are summarized below. Please refer to the [changelog] for detai
 > target the default PyG backend. Models that currently have only a DGL implementation will either be ported to
 > PyG before v4.0.0 or dropped from matgl at that point — track [changes.md](changes.md) for status.
 
-MatGL has been progressively moving away from the Deep Graph Library (DGL) framework, which is no longer actively
-maintained, to PyTorch Geometric (PyG). PyG became the default backend in v2.0.0, and as of v3.0.0 `TensorNet`,
-`M3GNet`, `QET`, and `MEGNet` all have native PyG implementations. **PyG is now the recommended and default
-backend.** DGL is retained only as a transitional fallback for the few remaining DGL-only models and is not
-actively maintained.
-
 A bug in the message-passing convention of `TensorNet`, `M3GNet`, and `QET` (both PyG and DGL) has been corrected:
 edge messages are now aggregated onto the source (center) node so each atom correctly collects information from
 its neighbors. Pre-trained weights generated under the old convention are no longer numerically valid. New weights
@@ -62,22 +56,6 @@ against the corrected convention and uploaded to the [`materialyze`](https://hug
 Face org, which is now the canonical (and only) source for matgl pre-trained models. The legacy GitHub
 `pretrained_models/` download fallback (`RemoteFile`, `PRETRAINED_MODELS_BASE_URL`) has been removed in this
 release.
-
-To use the remaining DGL-based models, you will need to install the DGL dependencies manually. This typically
-takes about 10 minutes, depending on the speed of downloading the required GPU packages:
-
-```bash
-pip install dgl==2.2.0
-pip install torch==2.3.0
-pip install "torchdata<=0.8.0"
-```
-
-and set the backend either via the environment variable `MATGL_BACKEND=DGL` or by using
-
-```python
-import matgl
-matgl.set_backend("DGL")
-```
 
 ## Current Architectures
 
@@ -179,6 +157,9 @@ import matgl
 
 # Load directly from a Hugging Face Hub repo id.
 model = matgl.load_model("materialyze/TensorNet-PES-MatPES-2025.2")
+
+# For materialyze org, you can also just use the bare model names directly.
+model = matgl.load_model("TensorNet-PES-MatPES-2025.2")
 ```
 
 To publish a trained model to the Hugging Face Hub, use `push_to_hub` (requires `huggingface-cli login` or a `token`):
@@ -272,7 +253,7 @@ potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet
 from matgl import load_model, MGLDatasetLoader, MGLPotentialTrainer
 
 # 1. Load the foundation potential and extract the inner graph model.
-pretrained = load_model("materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2")
+pretrained = load_model("TensorNet-PES-MatPES-r2SCAN-2025.2")
 model = pretrained.model            # the bare TensorNet — pretrained weights intact
 
 # 2. Build / load the fine-tuning dataset. Use MGLDatasetLoader for MatPES, or
