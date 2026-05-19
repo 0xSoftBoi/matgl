@@ -54,7 +54,7 @@ dependencies = [
     "boto3",
     "numpy",
     "torch-geometric",
-    "pymatgen-core>=2026.5.17",
+    "pymatgen-core>=2026.5.18",
     "huggingface_hub>=0.24",
 ]
 version = "3.0.3"
