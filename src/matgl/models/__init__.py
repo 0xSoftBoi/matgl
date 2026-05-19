@@ -11,11 +11,11 @@ from matgl.config import BACKEND
 from ._core import MatGLModel
 
 if BACKEND == "DGL":
-    from ._chgnet import CHGNet
+    from ._chgnet_dgl import CHGNet
     from ._m3gnet_dgl import M3GNet
     from ._megnet_dgl import MEGNet
     from ._qet_dgl import QET
-    from ._so3net import SO3Net
+    from ._so3net_dgl import SO3Net
     from ._tensornet_dgl import TensorNet
 else:
     from ._chgnet_pyg import CHGNet  # type: ignore[assignment]

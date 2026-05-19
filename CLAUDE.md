@@ -77,7 +77,7 @@ Docs/release helpers live in `tasks.py` (`invoke make-docs`, `invoke release <ve
 
 You will find paired private modules with `_dgl` / `_pyg` suffixes throughout the tree:
 
-- `matgl/models/_tensornet_{dgl,pyg}.py`, `_qet_{dgl,pyg}.py`, `_m3gnet_{dgl,pyg}.py`, `_megnet_{dgl,pyg}.py`, `_so3net{,_pyg}.py` (DGL file is unsuffixed for historical reasons), `_chgnet.py`, `_grace.py` — TensorNet, QET, M3GNet, MEGNet, and SO3Net have both DGL and PYG implementations; CHGNet is DGL-only; GRACE is PYG-only.
+- `matgl/models/_tensornet_{dgl,pyg}.py`, `_qet_{dgl,pyg}.py`, `_m3gnet_{dgl,pyg}.py`, `_megnet_{dgl,pyg}.py`, `_so3net_{dgl,pyg}.py`, `_chgnet_{dgl,pyg}.py`, `_grace.py` — TensorNet, QET, M3GNet, MEGNet, SO3Net, and CHGNet have both DGL and PYG implementations; GRACE is PYG-only.
 - `matgl/graph/_compute_{dgl,pyg}.py`, `_converters_{dgl,pyg}.py`, `_data_{dgl,pyg}.py` — graph build / dataset code is duplicated per backend.
 - `matgl/ext/_pymatgen_{dgl,pyg}.py`, `_ase_{dgl,pyg}.py` — pymatgen/ASE adaptors are also backend-split.
 - `matgl/layers/_*_{dgl,pyg}.py`, `matgl/utils/_training_{dgl,pyg}.py`, `matgl/apps/_pes_{dgl,pyg}.py` — same pattern.
