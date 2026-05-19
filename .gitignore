@@ -29,3 +29,9 @@ env
 venv
 .venv_dgl
 .conda
+
+scratch/
+wandb/
+lightning_logs/
+examples/md.log
+.claude/

@@ -2,7 +2,7 @@
 
 The set of model classes exposed here depends on the active ``MATGL_BACKEND``:
 
-- PyG (default): ``GRACE``, ``M3GNet``, ``MEGNet``, ``QET``, ``TensorNet``.
+- PyG (default): ``CHGNet``, ``GRACE``, ``M3GNet``, ``MEGNet``, ``QET``, ``TensorNet``.
 - DGL: ``CHGNet``, ``M3GNet``, ``MEGNet``, ``QET``, ``SO3Net``, ``TensorNet``.
 
 ``MatGLModel`` (base) and ``TransformedTargetModel`` (wrapper) are available
@@ -23,6 +23,7 @@ if BACKEND == "DGL":
     from ._so3net import SO3Net
     from ._tensornet_dgl import TensorNet
 else:
+    from ._chgnet_pyg import CHGNet  # type: ignore[assignment]
     from ._grace import GRACE
     from ._m3gnet_pyg import M3GNet  # type: ignore[assignment]
     from ._megnet_pyg import MEGNet  # type: ignore[assignment]
@@ -43,4 +44,4 @@ __all__ = [
 if BACKEND == "DGL":
     __all__ += ["CHGNet", "SO3Net"]
 else:
-    __all__ += ["GRACE"]
+    __all__ += ["GRACE", "CHGNet"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 
@@ -33,10 +34,8 @@ torch.set_float32_matmul_precision("high")
 
 
 def teardown():
-    try:
+    with contextlib.suppress(FileNotFoundError):
         shutil.rmtree("lightning_logs")
-    except FileNotFoundError:
-        pass
 
 
 def test_megnet_training(LiFePO4, BaNiO3):
