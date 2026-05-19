@@ -44,11 +44,15 @@ Major milestones are summarized below. Please refer to the [changelog] for detai
 
 ## Major update: v3.0.0 (May 2026)
 
+> **Deprecation notice.** The DGL backend is **deprecated** and will be **removed in v4.0.0**. New work should
+> target the default PyG backend. Models that currently have only a DGL implementation will either be ported to
+> PyG before v4.0.0 or dropped from matgl at that point — track [changes.md](changes.md) for status.
+
 MatGL has been progressively moving away from the Deep Graph Library (DGL) framework, which is no longer actively
 maintained, to PyTorch Geometric (PyG). PyG became the default backend in v2.0.0, and as of v3.0.0 `TensorNet`,
 `M3GNet`, `QET`, and `MEGNet` all have native PyG implementations. **PyG is now the recommended and default
-backend for these models.** DGL is retained only for legacy use (e.g., `CHGNet`, `SO3Net`) and will not be
-maintained going forward.
+backend.** DGL is retained only as a transitional fallback for the few remaining DGL-only models and is not
+actively maintained.
 
 A bug in the message-passing convention of `TensorNet`, `M3GNet`, and `QET` (both PyG and DGL) has been corrected:
 edge messages are now aggregated onto the source (center) node so each atom correctly collects information from
@@ -96,7 +100,7 @@ in the future.
   representations. It is a generalization of the [SO3Net] architecture, which is a minimalist SO(3)-equivariant neural
   network. In general, TensorNet has been shown to be much more data and parameter efficient than other equivariant
   architectures. It is currently the default architecture used in the [Materials Virtual Lab].
-- [Crystal Hamiltonian Graph Network (CHGNet)][chgnet] (DGL only) is a graph neural network based MLIP. CHGNet involves atom
+- [Crystal Hamiltonian Graph Network (CHGNet)][chgnet] is a graph neural network based MLIP. CHGNet involves atom
   graphs to capture atom bond relations and bond graph to capture angular information. It specializes in
   capturing the atomic charges through learning and predicting DFT atomic magnetic moments.
   See [original implementation][chgnetrepo]

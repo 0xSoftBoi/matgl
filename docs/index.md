@@ -49,12 +49,17 @@ Major milestones are summarized below. Please refer to the [changelog] for detai
 
 ## Major update: v2.0.0 (Nov 12 2025)
 
+> **Deprecation notice.** The DGL backend is **deprecated** and will be **removed in v4.0.0**. New work should
+> target the default PyG backend. Models that currently have only a DGL implementation will either be ported to
+> PyG before v4.0.0 or dropped from matgl at that point — track the [changelog] for status.
+
 We are in the process of moving away from the Deep Graph Library (DGL) framework to Pytorch Geometric (PyG) or even a
 pure PyTorch framework. This is motivated by the fact that DGL is no longer actively maintained. For now, both PYG and DGL
 models are available.
 
-From v2.0.0, MatGL will default to a PyG backend, and DGL is no longer a required dependency. For now, only TensorNet
-has been re-implemented in PYG. To use the DGL-based models (which includes the new QET), you will need to install the DGL dependencies manually. This typically takes about 10 minutes, depending on the speed of downloading the required GPU packages.:
+From v2.0.0, MatGL will default to a PyG backend, and DGL is no longer a required dependency. To use any remaining
+DGL-only models, you will need to install the DGL dependencies manually. This typically takes about 10 minutes,
+depending on the speed of downloading the required GPU packages:
 
 ```bash
 pip install "numpy<2"
@@ -91,7 +96,7 @@ in the future.
   representations. It is a generalization of the [SO3Net] architecture, which is a minimalist SO(3)-equivariant neural
   network. In general, TensorNet has been shown to be much more data and parameter efficient than other equivariant
   architectures. It is currently the default architecture used in the [Materials Virtual Lab].
-- [Crystal Hamiltonian Graph Network (CHGNet)][chgnet] (DGL only) is a graph neural network based MLIP. CHGNet involves atom
+- [Crystal Hamiltonian Graph Network (CHGNet)][chgnet] is a graph neural network based MLIP. CHGNet involves atom
   graphs to capture atom bond relations and bond graph to capture angular information. It specializes in
   capturing the atomic charges through learning and predicting DFT atomic magnetic moments.
   See [original implementation][chgnetrepo]
