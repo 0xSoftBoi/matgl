@@ -112,6 +112,10 @@ else:
     from matgl.layers._atom_ref_pyg import AtomRef  # type: ignore[assignment]
     from matgl.layers._embedding_pyg import TensorEmbedding  # type: ignore[assignment]
     from matgl.layers._graph_convolution_pyg import (  # type: ignore[assignment]
+        CHGNetAtomGraphBlock,
+        CHGNetBondGraphBlock,
+        CHGNetGraphConv,
+        CHGNetLineGraphConv,
         M3GNetBlock,
         M3GNetGraphConv,
         MEGNetBlock,

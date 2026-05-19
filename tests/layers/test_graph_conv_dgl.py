@@ -52,8 +52,7 @@ def build_graph(N, E, NDIM=5, EDIM=3, GDIM=10):
 def get_graphs(num_graphs, NDIM=5, EDIM=3, GDIM=10):
     Ns = torch.randint(10, 30, (num_graphs,)).tolist()
     Es = torch.randint(35, 100, (num_graphs,)).tolist()
-    graphs = [build_graph(*gspec, NDIM, EDIM, GDIM) for gspec in zip(Ns, Es, strict=False)]
-    return graphs
+    return [build_graph(*gspec, NDIM, EDIM, GDIM) for gspec in zip(Ns, Es, strict=False)]
 
 
 def batch(state_attrs_lists):
@@ -76,8 +75,7 @@ def test_megnet_layer():
     # one pass
     edge_feat = batched_graph.edata.pop("edge_feat")
     node_feat = batched_graph.ndata.pop("node_feat")
-    out = layer(batched_graph, edge_feat, node_feat, attrs)
-    return out
+    return layer(batched_graph, edge_feat, node_feat, attrs)
 
 
 def test_megnet_block():

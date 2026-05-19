@@ -1,10 +1,5 @@
 """Graph neural network model implementations.
 
-The set of model classes exposed here depends on the active ``MATGL_BACKEND``:
-
-- PyG (default): ``GRACE``, ``M3GNet``, ``MEGNet``, ``QET``, ``SO3Net``, ``TensorNet``.
-- DGL: ``CHGNet``, ``M3GNet``, ``MEGNet``, ``QET``, ``SO3Net``, ``TensorNet``.
-
 ``MatGLModel`` (base) and ``TransformedTargetModel`` (wrapper) are available
 under both backends.
 """
@@ -23,6 +18,7 @@ if BACKEND == "DGL":
     from ._so3net import SO3Net
     from ._tensornet_dgl import TensorNet
 else:
+    from ._chgnet_pyg import CHGNet  # type: ignore[assignment]
     from ._grace import GRACE
     from ._m3gnet_pyg import M3GNet  # type: ignore[assignment]
     from ._megnet_pyg import MEGNet  # type: ignore[assignment]
@@ -34,6 +30,7 @@ from ._wrappers import TransformedTargetModel
 
 __all__ = [
     "QET",
+    "CHGNet",
     "M3GNet",
     "MEGNet",
     "MatGLModel",
@@ -42,7 +39,5 @@ __all__ = [
     "TransformedTargetModel",
 ]
 
-if BACKEND == "DGL":
-    __all__ += ["CHGNet"]
-else:
+if BACKEND != "DGL":
     __all__ += ["GRACE"]
