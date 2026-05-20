@@ -6,6 +6,7 @@ import importlib
 import logging
 import os
 import shutil
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +32,12 @@ BACKEND: Literal["PYG", "DGL"] = os.environ.get("MATGL_BACKEND", "PYG").upper() 
 def ensure_backend(backend: Literal["DGL", "PYG"]) -> None:
     """Validate that the requested backend is installed."""
     if backend == "DGL":
+        warnings.warn(
+            "The DGL backend (MATGL_BACKEND=DGL) is deprecated and will be removed in matgl v4.0.0. "
+            "Switch to the default PyG backend (MATGL_BACKEND=PYG), which is available for all models.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         try:
             importlib.util.find_spec("dgl")  # type: ignore[attr-defined]
         except ImportError as err:

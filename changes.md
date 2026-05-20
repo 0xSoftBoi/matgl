@@ -6,7 +6,7 @@ nav_order: 3
 
 # Change Log
 
-## Unreleased
+## 3.0.4
 - **PyG `SO3Net`.** New `matgl.models._so3net_pyg.SO3Net` is the PyG counterpart of the existing DGL
   `SO3Net` and is now the implementation selected on the default PyG backend. The full public surface is
   preserved (`target_property` in `{atomwise, dipole_moment, polarizability, graph}`, `readout_type` in
@@ -14,9 +14,8 @@ nav_order: 3
   `use_vector_representation`, `return_vector_representation`). Forward now takes a PyG `Data`/`Batch` and
   aggregates per-graph via `scatter_add` / `bincount` instead of `dgl.readout_nodes` / `batch_num_nodes`.
 - **DGL backend deprecated.** The DGL backend (`MATGL_BACKEND=DGL`) is deprecated and will be **removed in
-  v4.0.0**. PyG is now the only supported backend for new work. The remaining DGL-only model (`CHGNet`)
-  will either be ported to PyG before v4.0.0 or dropped at that point. User-facing docs no longer single
-  out individual models as "DGL only" — the broader DGL deprecation supersedes those notes.
+  v4.0.0**. PyG is now the only supported backend for new work. `ensure_backend("DGL")` (called at import
+  time when `MATGL_BACKEND=DGL`, and from `matgl.set_backend("DGL")`) now emits a `DeprecationWarning`.
 
 ## 3.0.3
 - **GRACE (PyG) interatomic potential.** New `matgl.models.GRACE` (beta) joins TensorNet / M3GNet / MEGNet / QET / CHGNet / SO3Net on the PyG backend. (#779)
