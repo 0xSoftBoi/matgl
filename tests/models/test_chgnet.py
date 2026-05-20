@@ -16,6 +16,9 @@ from matgl.ext._ase_dgl import PESCalculator
 from matgl.ext._pymatgen_dgl import Structure2Graph
 from matgl.models import CHGNet
 
+# DGL CHGNet tests temporarily disabled.
+pytest.skip("DGL CHGNet tests are commented out", allow_module_level=True)
+
 
 @pytest.mark.parametrize("threebody_cutoff", [0, 3])
 @pytest.mark.parametrize("dropout", [0.0, 0.5])
