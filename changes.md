@@ -6,6 +6,9 @@ nav_order: 3
 
 # Change Log
 
+## 3.0.5
+- **Bug fix: `QET` no longer crashes on single-atom structures.** Bare `torch.squeeze()` calls in `QET.forward` (and in the DGL `LinearQeq` QEq solver) collapsed the size-1 node dimension of a one-atom input to a 0-d scalar, raising `IndexError` inside the PyG `ElectrostaticPotential` and a node-feature shape error on the DGL backend. These now use `.reshape(-1)`, which drops only trailing feature dimensions and never the node dimension.
+
 ## 3.0.4
 - **PyG `SO3Net`.** New `matgl.models._so3net_pyg.SO3Net` is the PyG counterpart of the existing DGL
   `SO3Net` and is now the implementation selected on the default PyG backend. The full public surface is
@@ -35,7 +38,6 @@ nav_order: 3
   - Opt-in `torch.compile` flag on `Potential` (PyG) for further inference speedups. (#784)
   - Low-risk speedups across `Structure2Graph` / `Molecule2Graph` converters, the training loop, and the ASE `PESCalculator`. (#781)
 - **Bug fix (PyG): `Potential.forward` no longer mutates the input graph.** Previously the autograd `pos.requires_grad_(True)` / `cell.requires_grad_(True)` toggles were applied in place on the caller's `Data` object, which leaked grad-tracking state across reuses. The forward now operates on a shallow clone of the relevant tensors. (#785)
-- **Bug fix: `QET` no longer crashes on single-atom structures.** Bare `torch.squeeze()` calls in `QET.forward` (and in the DGL `LinearQeq` QEq solver) collapsed the size-1 node dimension of a one-atom input to a 0-d scalar, raising `IndexError` inside the PyG `ElectrostaticPotential` and a node-feature shape error on the DGL backend. These now use `.reshape(-1)`, which drops only trailing feature dimensions and never the node dimension.
 - Fleshed out module-level docstrings for `matgl.apps` and `matgl.layers`, and the `Potential` wrapper docstring (energy / force / stress / charge contract, stress unit, magmom / charge head gating).
 
 ## 3.0.2
