@@ -44,11 +44,9 @@ Major milestones are summarized below. Please refer to the [changelog] for detai
 
 ## Major update: v3.0.0 (May 2026)
 
-MatGL has been progressively moving away from the Deep Graph Library (DGL) framework, which is no longer actively
-maintained, to PyTorch Geometric (PyG). PyG became the default backend in v2.0.0, and as of v3.0.0 `TensorNet`,
-`M3GNet`, `QET`, and `MEGNet` all have native PyG implementations. **PyG is now the recommended and default
-backend for these models.** DGL is retained only for legacy use (e.g., `CHGNet`, `SO3Net`) and will not be
-maintained going forward.
+> **Deprecation notice.** The DGL backend is **deprecated** and will be **removed in v4.0.0**. New work should
+> target the default PyG backend. Models that currently have only a DGL implementation will either be ported to
+> PyG before v4.0.0 or dropped from matgl at that point — track [changes.md](changes.md) for status.
 
 A bug in the message-passing convention of `TensorNet`, `M3GNet`, and `QET` (both PyG and DGL) has been corrected:
 edge messages are now aggregated onto the source (center) node so each atom correctly collects information from
@@ -58,23 +56,6 @@ against the corrected convention and uploaded to the [`materialyze`](https://hug
 Face org, which is now the canonical (and only) source for matgl pre-trained models. The legacy GitHub
 `pretrained_models/` download fallback (`RemoteFile`, `PRETRAINED_MODELS_BASE_URL`) has been removed in this
 release.
-
-To use the remaining DGL-based models, you will need to install the DGL dependencies manually. This typically
-takes about 10 minutes, depending on the speed of downloading the required GPU packages:
-
-```bash
-pip install "numpy<2"
-pip install dgl==2.2.0
-pip install torch==2.3.0
-pip install "torchdata<=0.8.0"
-```
-
-and set the backend either via the environment variable `MATGL_BACKEND=DGL` or by using
-
-```python
-import matgl
-matgl.set_backend("DGL")
-```
 
 ## Current Architectures
 
@@ -97,7 +78,7 @@ in the future.
   representations. It is a generalization of the [SO3Net] architecture, which is a minimalist SO(3)-equivariant neural
   network. In general, TensorNet has been shown to be much more data and parameter efficient than other equivariant
   architectures. It is currently the default architecture used in the [Materials Virtual Lab].
-- [Crystal Hamiltonian Graph Network (CHGNet)][chgnet] (DGL only) is a graph neural network based MLIP. CHGNet involves atom
+- [Crystal Hamiltonian Graph Network (CHGNet)][chgnet] is a graph neural network based MLIP. CHGNet involves atom
   graphs to capture atom bond relations and bond graph to capture angular information. It specializes in
   capturing the atomic charges through learning and predicting DFT atomic magnetic moments.
   See [original implementation][chgnetrepo]
@@ -176,6 +157,9 @@ import matgl
 
 # Load directly from a Hugging Face Hub repo id.
 model = matgl.load_model("materialyze/TensorNet-PES-MatPES-2025.2")
+
+# For materialyze org, you can also just use the bare model names directly.
+model = matgl.load_model("TensorNet-PES-MatPES-2025.2")
 ```
 
 To publish a trained model to the Hugging Face Hub, use `push_to_hub` (requires `huggingface-cli login` or a `token`):
@@ -269,7 +253,7 @@ potential = trainer.fit(dataset=ds, atomrefs=refs, save_path="./MatPES-TensorNet
 from matgl import load_model, MGLDatasetLoader, MGLPotentialTrainer
 
 # 1. Load the foundation potential and extract the inner graph model.
-pretrained = load_model("materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2")
+pretrained = load_model("TensorNet-PES-MatPES-r2SCAN-2025.2")
 model = pretrained.model            # the bare TensorNet — pretrained weights intact
 
 # 2. Build / load the fine-tuning dataset. Use MGLDatasetLoader for MatPES, or
@@ -413,7 +397,6 @@ for their contributions to warp-acceleration for TensorNet, which yielded ~2-3x 
 
 [m3gnetrepo]: https://github.com/materialyzeai/m3gnet "M3GNet repo"
 [megnetrepo]: https://github.com/materialyzeai/megnet "MEGNet repo"
-[dgl]: https://www.dgl.ai "DGL website"
 [materialyze]: http://materialyze.ai "Materialyze.AI website"
 [changelog]: https://matgl.ai/changes "Changelog"
 [graphnetwork]: https://arxiv.org/abs/1806.01261 "Deepmind's paper"

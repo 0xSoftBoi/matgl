@@ -6,6 +6,20 @@ nav_order: 3
 
 # Change Log
 
+## 3.0.5
+- **Bug fix: `QET` no longer crashes on single-atom structures.** Bare `torch.squeeze()` calls in `QET.forward` (and in the DGL `LinearQeq` QEq solver) collapsed the size-1 node dimension of a one-atom input to a 0-d scalar, raising `IndexError` inside the PyG `ElectrostaticPotential` and a node-feature shape error on the DGL backend. These now use `.reshape(-1)`, which drops only trailing feature dimensions and never the node dimension.
+
+## 3.0.4
+- **PyG `SO3Net`.** New `matgl.models._so3net_pyg.SO3Net` is the PyG counterpart of the existing DGL
+  `SO3Net` and is now the implementation selected on the default PyG backend. The full public surface is
+  preserved (`target_property` in `{atomwise, dipole_moment, polarizability, graph}`, `readout_type` in
+  `{set2set, weighted_atom, reduce_atom}`, `correct_charges`, `predict_dipole_magnitude`,
+  `use_vector_representation`, `return_vector_representation`). Forward now takes a PyG `Data`/`Batch` and
+  aggregates per-graph via `scatter_add` / `bincount` instead of `dgl.readout_nodes` / `batch_num_nodes`.
+- **DGL backend deprecated.** The DGL backend (`MATGL_BACKEND=DGL`) is deprecated and will be **removed in
+  v4.0.0**. PyG is now the only supported backend for new work. `ensure_backend("DGL")` (called at import
+  time when `MATGL_BACKEND=DGL`, and from `matgl.set_backend("DGL")`) now emits a `DeprecationWarning`.
+
 ## 3.0.3
 - **GRACE (PyG) interatomic potential.** New `matgl.models.GRACE` (beta) joins TensorNet / M3GNet / MEGNet / QET / CHGNet / SO3Net on the PyG backend. (#779)
 - **`matgl.utils.training.MGLPotentialTrainer` + `MGLDatasetLoader` (new, PyG-only).** First dataset-level Hugging Face integration in matgl: a configure-once / fit-when-asked trainer paired with a small dataset-factory class that hoists HF auth / cache config to one place. `__init__` stores hyperparameters; nothing heavy runs until `fit(dataset=...)`. (#782)

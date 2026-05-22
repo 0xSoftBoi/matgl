@@ -110,7 +110,7 @@ class LinearQeq(nn.Module):
         else:
             total_charge = torch.ones(g.batch_size, 1, device=g.device) * total_charge
 
-        g.ndata["sum_q"] = torch.squeeze(dgl.broadcast_nodes(g, total_charge))
+        g.ndata["sum_q"] = dgl.broadcast_nodes(g, total_charge).reshape(-1)
 
         sum_hardness_inv = dgl.sum_nodes(g, "hardness_inv")
         sum_chi_hardness_inv = dgl.sum_nodes(g, "chi_hardness_inv")

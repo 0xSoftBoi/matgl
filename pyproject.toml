@@ -52,26 +52,17 @@ dependencies = [
     "lightning<=2.6.1",
     "pydantic",
     "boto3",
-    "numpy<3.0",
+    "numpy",
     "torch-geometric",
-    "pymatgen-core>=2026.4.16",
+    "pymatgen-core>=2026.5.18",
     "huggingface_hub>=0.24",
 ]
-version = "3.0.3"
+version = "3.0.5"
 
 [project.scripts]
 mgl = "matgl.cli:main"
 
 [project.optional-dependencies]
-dgl = [
-    # "numpy<2.0",
-    "dgl<=2.1.0; sys.platform == 'win32'",
-    "dgl==2.2.0; sys.platform == 'darwin'",
-    # "torch==2.3.0; sys.platform == 'darwin'",
-    # "torchdata<=0.8.0",
-    "dgl<=2.4.0; sys.platform == 'linux'",
-    # "torch<=2.4.0; sys.platform == 'linux'",
-]
 ops = [
   "nvalchemi-toolkit-ops",
 ]

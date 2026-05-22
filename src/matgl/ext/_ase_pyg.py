@@ -246,26 +246,24 @@ class PESCalculator(Calculator):
             calc_result = self.potential(graph, lattice, self.state_attr)
         else:
             calc_result = self.potential(graph, lattice, state_attr_default)
-
-        # Detach to host once per output tensor — repeated ``.detach().cpu()``
-        # on the same tensor was triggering an extra host sync per MD step.
-        host = [t.detach().cpu() for t in calc_result]
-        energy_arr = host[0].numpy()
-        forces_arr = host[1].numpy()
-        energy_val = energy_arr.item()
+        energy_val = calc_result[0].detach().cpu().numpy().item()
         self.results.update(
             energy=energy_val,
             free_energy=energy_val,
-            forces=forces_arr,
+            forces=calc_result[1].detach().cpu().numpy(),
         )
         if self.compute_stress:
-            stress_arr = host[2].numpy()
-            stresses_np = full_3x3_to_voigt_6_stress(stress_arr) if self.use_voigt else stress_arr
+            stress_tensor = calc_result[2][0] if calc_result[2].dim() == 3 else calc_result[2]
+            stresses_np = (
+                full_3x3_to_voigt_6_stress(stress_tensor.detach().cpu().numpy())
+                if self.use_voigt
+                else stress_tensor.detach().cpu().numpy()
+            )
             self.results.update(stress=stresses_np * self.conversion_factor)
         if self.compute_hessian:
-            self.results.update(hessian=host[3].numpy())
+            self.results.update(hessian=calc_result[3].detach().cpu().numpy())
         if self.compute_magmom:
-            self.results.update(magmoms=host[4].numpy())
+            self.results.update(magmoms=calc_result[4].detach().cpu().numpy())
 
 
 # for backward compatibility
@@ -302,7 +300,7 @@ class Relaxer:
         relax_cell: bool = True,
         **kwargs,
     ):
-        """Initialize the Relaxer.
+        """Initialize Relaxer.
 
         Args:
             potential (Potential): a M3GNet potential, a str path to a saved model or a short name for saved model
@@ -396,10 +394,7 @@ class Relaxer:
 
 
 class TrajectoryObserver(collections.abc.Sequence):
-    """Trajectory observer hook for the relaxation process.
-
-    Saves the intermediate structures.
-    """
+    """Trajectory observer is a hook in the relaxation process that saves the intermediate structures."""
 
     def __init__(self, atoms: Atoms) -> None:
         """Init the Trajectory Observer from a Atoms.

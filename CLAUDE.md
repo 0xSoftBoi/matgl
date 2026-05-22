@@ -12,20 +12,19 @@ Environment setup (Python 3.11+ required):
 
 ```bash
 uv venv && uv sync                 # install runtime deps + dev group
-uv pip install -e ".[dgl]"         # add the optional DGL backend (Linux/macOS only)
 ```
 
-DGL on macOS — DGL tests must run from a **separate virtualenv at `.venv_dgl/`** (gitignored).
-The pinned versions are taken from `README.md` and are required for any test that exercises DGL,
-i.e. `MATGL_BACKEND=DGL` or DGL-only models (CHGNet, SO3Net):
+DGL on macOS — the DGL backend is no longer a packaged extra, but the DGL source tree
+is still in `src/matgl/` and any test that exercises DGL (i.e. `MATGL_BACKEND=DGL`, or
+the remaining DGL-only CHGNet model) needs a **separate virtualenv at `.venv_dgl/`**
+(gitignored) with the pinned versions below installed manually:
 
 ```bash
 uv venv .venv_dgl                                       # one-time: create the DGL-only env
-uv pip install --python .venv_dgl/bin/python "numpy<2"
 uv pip install --python .venv_dgl/bin/python dgl==2.2.0
 uv pip install --python .venv_dgl/bin/python torch==2.3.0
 uv pip install --python .venv_dgl/bin/python "torchdata<=0.8.0"
-uv pip install --python .venv_dgl/bin/python -e ".[dgl]"
+uv pip install --python .venv_dgl/bin/python -e .
 ```
 
 Run DGL tests against that interpreter (do **not** use the default `.venv` for DGL):
@@ -78,7 +77,7 @@ Docs/release helpers live in `tasks.py` (`invoke make-docs`, `invoke release <ve
 
 You will find paired private modules with `_dgl` / `_pyg` suffixes throughout the tree:
 
-- `matgl/models/_tensornet_{dgl,pyg}.py`, `_qet_{dgl,pyg}.py`, `_m3gnet_{dgl,pyg}.py`, `_megnet_{dgl,pyg}.py`, `_chgnet.py`, `_so3net.py`, `_grace.py` — TensorNet, QET, M3GNet, and MEGNet have both DGL and PYG implementations; CHGNet and SO3Net are DGL-only; GRACE is PYG-only.
+- `matgl/models/_tensornet_{dgl,pyg}.py`, `_qet_{dgl,pyg}.py`, `_m3gnet_{dgl,pyg}.py`, `_megnet_{dgl,pyg}.py`, `_so3net_{dgl,pyg}.py`, `_chgnet_{dgl,pyg}.py`, `_grace.py` — TensorNet, QET, M3GNet, MEGNet, SO3Net, and CHGNet have both DGL and PYG implementations; GRACE is PYG-only.
 - `matgl/graph/_compute_{dgl,pyg}.py`, `_converters_{dgl,pyg}.py`, `_data_{dgl,pyg}.py` — graph build / dataset code is duplicated per backend.
 - `matgl/ext/_pymatgen_{dgl,pyg}.py`, `_ase_{dgl,pyg}.py` — pymatgen/ASE adaptors are also backend-split.
 - `matgl/layers/_*_{dgl,pyg}.py`, `matgl/utils/_training_{dgl,pyg}.py`, `matgl/apps/_pes_{dgl,pyg}.py` — same pattern.

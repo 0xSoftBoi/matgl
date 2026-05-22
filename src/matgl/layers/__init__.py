@@ -48,8 +48,8 @@ backend-specific submodules. Each piece of backend-specific code lives in
 a sibling ``_*_dgl.py`` / ``_*_pyg.py`` module, and the public names above
 are re-exported from this ``__init__`` so callers can ignore which
 implementation is active. As of this writing the PyG path covers
-TensorNet, M3GNet, MEGNet, GRACE and SO3Net; CHGNet, QET, and a handful
-of readout flavours remain DGL-only.
+TensorNet, M3GNet, MEGNet, QET, GRACE and SO3Net; CHGNet and a handful of
+readout flavours remain DGL-only.
 
 Backend-agnostic modules (no ``_pyg`` / ``_dgl`` suffix) operate purely on
 plain tensors and can be reused from both code paths --
@@ -112,6 +112,10 @@ else:
     from matgl.layers._atom_ref_pyg import AtomRef  # type: ignore[assignment]
     from matgl.layers._embedding_pyg import TensorEmbedding  # type: ignore[assignment]
     from matgl.layers._graph_convolution_pyg import (  # type: ignore[assignment]
+        CHGNetAtomGraphBlock,
+        CHGNetBondGraphBlock,
+        CHGNetGraphConv,
+        CHGNetLineGraphConv,
         M3GNetBlock,
         M3GNetGraphConv,
         MEGNetBlock,
