@@ -246,20 +246,20 @@ class QET(TensorNet):
         x = fea_dict["readout"]
 
         g.ndata["chi"] = (
-            torch.squeeze(self.chi_readout(x)) + g.ndata["chi_ext"]
+            self.chi_readout(x).reshape(-1) + g.ndata["chi_ext"]
             if "chi_ext" in g.ndata
-            else torch.squeeze(self.chi_readout(x))
+            else self.chi_readout(x).reshape(-1)
         )
 
         if self.include_magmom:
-            g.ndata["magmom"] = torch.squeeze(self.magmom_readout(x))
+            g.ndata["magmom"] = self.magmom_readout(x).reshape(-1)
 
         if self.is_hardness_envs:
-            g.ndata["hardness"] = torch.squeeze(self.hardness_readout(x))  # type: ignore[operator]
+            g.ndata["hardness"] = self.hardness_readout(x).reshape(-1)  # type: ignore[operator]
         else:
-            g.ndata["hardness"] = torch.squeeze(self.hardness_readout[g.ndata["node_type"]])  # type: ignore[index]
+            g.ndata["hardness"] = self.hardness_readout[g.ndata["node_type"]].reshape(-1)  # type: ignore[index]
 
-        g.ndata["sigma"] = torch.squeeze(self.sigma[g.ndata["node_type"]])
+        g.ndata["sigma"] = self.sigma[g.ndata["node_type"]].reshape(-1)
 
         g = self.qeq(g=g, total_charge=total_charge)
         g = self.elec_pot(g)
