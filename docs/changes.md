@@ -6,15 +6,92 @@ nav_order: 3
 
 # Change Log
 
-## 2.1.3
+## 4.0.0
+- **DGL backend removed.** All DGL implementations have been deleted. matgl now targets PyTorch Geometric
+  exclusively. The `MATGL_BACKEND` env var and the `ensure_backend()` helper have been removed.
+  `matgl.set_backend()` is retained as a no-op stub for backwards compatibility and emits a
+  `DeprecationWarning` when `"DGL"` is requested. Private `_*_pyg.py` modules have been renamed to drop
+  the `_pyg` suffix.
+- **Optional JAX inference backend (`matgl.ext.jax`, experimental).** New subpackage that reimplements the inference path (energy + forces + stress) of the `TensorNet` and `QET` models in JAX. A pre-trained PyTorch potential is converted to a JAX parameter tree and JIT-compiled by XLA into one fused program, giving a portable (CPU / CUDA / Apple-Silicon) ~2-3.5x speedup over eager PyTorch for the MD / relaxation inner loop, with no NVIDIA-Warp dependency. `JAXPESCalculator` is a drop-in twin of `matgl.ext.ase.PESCalculator`. Outputs match the PyTorch reference to float64 precision. Requires the optional `jax` extra (`pip install matgl[jax]`); inference-only.
+- **Bug fix: `QET` no longer crashes on single-atom structures.** Bare `torch.squeeze()` calls in `QET.forward` collapsed the size-1 node dimension of a one-atom input to a 0-d scalar, raising `IndexError` inside `ElectrostaticPotential`. These now use `.reshape(-1)`, which drops only trailing feature dimensions and never the node dimension.
+- **Bug fix: `TensorNet` / `QET` no longer crash with the non-smooth `SphericalBessel` radial basis.** With `rbf_type="SphericalBessel"` and `use_smooth=False`, the basis emits `max_l * max_n` features, but the embedding / interaction input `Linear` layers were sized for only `max_n`, raising a shape-mismatch `RuntimeError` in the forward pass. The radial-basis width fed to those layers now correctly accounts for `max_l` in the non-smooth case (the smooth `SphericalBessel` and `Gaussian` bases are unaffected).
+
+## 3.0.4
+- **PyG `SO3Net`.** New `matgl.models._so3net_pyg.SO3Net` is the PyG counterpart of the existing DGL
+  `SO3Net` and is now the implementation selected on the default PyG backend. The full public surface is
+  preserved (`target_property` in `{atomwise, dipole_moment, polarizability, graph}`, `readout_type` in
+  `{set2set, weighted_atom, reduce_atom}`, `correct_charges`, `predict_dipole_magnitude`,
+  `use_vector_representation`, `return_vector_representation`). Forward now takes a PyG `Data`/`Batch` and
+  aggregates per-graph via `scatter_add` / `bincount` instead of `dgl.readout_nodes` / `batch_num_nodes`.
+- **DGL backend deprecated.** The DGL backend (`MATGL_BACKEND=DGL`) is deprecated and will be **removed in
+  v4.0.0**. PyG is now the only supported backend for new work. `ensure_backend("DGL")` (called at import
+  time when `MATGL_BACKEND=DGL`, and from `matgl.set_backend("DGL")`) now emits a `DeprecationWarning`.
+
+## 3.0.3
+- **GRACE (PyG) interatomic potential.** New `matgl.models.GRACE` (beta) joins TensorNet / M3GNet / MEGNet / QET / CHGNet / SO3Net on the PyG backend. (#779)
+- **`matgl.utils.training.MGLPotentialTrainer` + `MGLDatasetLoader` (new, PyG-only).** First dataset-level Hugging Face integration in matgl: a configure-once / fit-when-asked trainer paired with a small dataset-factory class that hoists HF auth / cache config to one place. `__init__` stores hyperparameters; nothing heavy runs until `fit(dataset=...)`. (#782)
+  - **`MGLDatasetLoader`** (defaults to HF `materialyze/matpes`): `loader = MGLDatasetLoader()` then `loader.matpes_dataset(version="r2SCAN-2025.2")` and `loader.matpes_element_refs(version="r2SCAN-2025.2", element_types=...)`. Override `repo_id` / `revision` / `token` / `cache_dir` in the constructor to point at a fork or a private mirror. Element references are reorderable to the caller's `element_types`. Stresses in the on-disk MatPES JSON (kbar, VASP compressive-positive) are converted to matgl's GPa compressive-negative convention automatically; pass `stress_unit="GPa"` to skip the conversion. For datasets (MatPES forks, custom DFT runs) already on disk, `loader.from_json("/path/to/file.json", ...)` skips the HF round trip entirely. The JSON file must use the same per-record schema as the MatPES dataset — `structure` (pymatgen-serialisable) + `energy` / `forces` / `stress` PES keys; any extra metadata fields are ignored. `stress_unit` defaults to `"kbar"` (MatPES on-disk convention) and is applied consistently with the HF path. The loader returns a raw `MGLDataset`; splitting + `MGLDataLoader` wrapping is the trainer's job (see `MGLPotentialTrainer`'s `frac_list` / `shuffle` / `random_state` `loader_kwargs`).
+  - **`MGLPotentialTrainer`**: `MGLPotentialTrainer(model, accelerator="auto", max_epochs=100, ...)` accepts the full Lightning placement vocabulary (`"auto"` / `"cpu"` / `"gpu"` / `"cuda"` / `"mps"` / `"tpu"`). `trainer.fit(dataset, *, atomrefs=None, save_path=None)` is a small focused entry point:
+    - `dataset` is a pre-built `MGLDataset` (random split inside `_build_dataloaders` via `frac_list` / `shuffle` / `random_state`) or a `{"train", "valid", "test"}` mapping of pre-built splits. Use `MGLDatasetLoader` above to build one.
+    - `atomrefs` accepts `np.ndarray` / `AtomRef` instance / `None`. Use `MGLDatasetLoader().matpes_element_refs(...)` to download or `fit_element_refs(...)` to fit locally.
+    - Loss-term toggling follows the constructor weights: set `stress_weight=0` for datasets without stress labels (cluster / dimer extxyz), and `magmom_weight` / `charge_weight` `> 0` only when the dataset carries those labels.
+    - After fit, `trainer.potential` / `trainer.lit_module` / `trainer.trainer` / `trainer.loaders` / `trainer.dataset` / `trainer.atomrefs` are populated. Defaults: Huber loss with stress weight 0.1, batch size 32, lr 1e-3, 100 epochs, CosineAnnealingLR (`decay_steps=1000`, `decay_alpha=0.01`).
+- **`MGLDataLoader` collate auto-detect (PyG).** When `collate_fn` is omitted, the loader now picks one from the training dataset's label keys (`collate_fn_graph` for property prediction, `collate_fn_pes` with stress / magmom / charge flags toggled to match labels), mirroring the DGL path. `Subset` (post-`split_dataset`) is peeled to reach the underlying `MGLDataset.labels`. Explicit `collate_fn=` always wins. (#782)
+- **`fit_element_refs` training helper.** Convenience function that fits per-element energy offsets from pymatgen `Structure`s + energies via `np.linalg.lstsq`, returning an array that drops directly into `PotentialLightningModule(element_refs=...)` or `Potential(element_refs=...)`. (#780)
+- **Performance speedups (no checkpoint or public-API changes).**
+  - Cache spherical-Bessel basis constants (zeros, normalization factors) in `__init__` instead of recomputing them in every `forward`. (#787)
+  - Lower-overhead `Potential` and `AtomRef` forward paths on PyG: hoist `.to(device)` / shape work out of the hot path, avoid redundant tensor allocations. (#783)
+  - Port the same `Potential` / `AtomRef` speedups to DGL. (#786)
+  - Opt-in `torch.compile` flag on `Potential` (PyG) for further inference speedups. (#784)
+  - Low-risk speedups across `Structure2Graph` / `Molecule2Graph` converters, the training loop, and the ASE `PESCalculator`. (#781)
+- **Bug fix (PyG): `Potential.forward` no longer mutates the input graph.** Previously the autograd `pos.requires_grad_(True)` / `cell.requires_grad_(True)` toggles were applied in place on the caller's `Data` object, which leaked grad-tracking state across reuses. The forward now operates on a shallow clone of the relevant tensors. (#785)
+- Fleshed out module-level docstrings for `matgl.apps` and `matgl.layers`, and the `Potential` wrapper docstring (energy / force / stress / charge contract, stress unit, magmom / charge head gating).
+
+## 3.0.2
+- New `matgl.utils.callbacks.PredictionLogger` Lightning callback for capturing per-epoch energy and per-atom force   predictions, ground truth, and errors during `PotentialLightningModule` training. Pairs with   `add_sample_indices(dataset)` to keep `(n_epochs, n_samples)` log columns in a stable per-sample order across
+  shuffled training epochs. The callback persists the cumulative log to disk every epoch end so it survives a
+  walltime cut. `PredictionLogger` also logs stress and per-atom charge whenever the wrapped potential computes them
+  (`model.calc_stresses` / `model.calc_charge`); pass `log_stress=False` or `log_charge=False` to opt out. New keys in the saved payload: `{train,val}_stress_{preds,labels,errors}` shape `(n_epochs, n_samples, 3, 3)` and
+  `{train,val}_charge_{preds,labels,errors}` shape `(n_epochs, n_atoms)`. (#777)
+
+## 3.0.1
+- PyG charge-training parity for `QET`. `PotentialLightningModule` now accepts `charge_weight` and adds a per-atom
+  charge loss term (`Charge_MAE` / `Charge_RMSE`) on top of energy/force/stress; `Potential.forward` (PyG) takes
+  `total_charge` / `ext_pot` and returns equilibrated charges in the output tuple, mirroring the DGL pipeline.
+- `MGLDataset` (PyG) gains `include_ref_charge` to attach per-atom `q_ref` onto each `Data` object (consumed by
+  `LinearQeq`); `collate_fn_pes` (PyG) gains `include_charge` so per-atom charge labels propagate through batches.
+- Renamed PyG layer classes for cross-backend consistency: `AtomRefPyG` -> `AtomRef`, `NuclearRepulsionPyG` ->
+  `NuclearRepulsion` (matching the DGL counterparts).
+- CI: bumped GitHub Actions to Node 24 versions (`actions/checkout@v5`, `actions/setup-python@v6`,
+  `actions/upload-artifact@v5`, `actions/download-artifact@v5`, `astral-sh/setup-uv@v7`).
+
+## 3.0.0
+- **PyG `M3GNet` and `QET`.** New PyG implementations of `M3GNet` and `QET` join the existing PyG `TensorNet` and
+  `MEGNet`, so all four core architectures now run on the default PyG backend without DGL.
+- **Message-passing fix (TensorNet, M3GNet, QET).** Corrected the message-passing convention in the interaction
+  and embedding blocks of `TensorNet`, `M3GNet`, and `QET` (both PyG and DGL): edge messages are now aggregated
+  onto the source (center) node so each atom correctly collects information from its neighbors. Pre-trained
+  weights generated under the old convention are no longer numerically valid. (#758, @kenko911)
+- **New pre-trained weights on Hugging Face.** `TensorNet-PES-MatPES-PBE-2025.2`, the `M3GNet` and `QET` PyG
+  potentials, and related models have been retrained against the corrected message-passing convention and
+  re-released on the [`materialyze`](https://huggingface.co/materialyze) HF org, which is now the canonical
+  source for all matgl pre-trained models.
+- **Breaking — removed legacy GitHub `pretrained_models/` download fallback.** The `RemoteFile` class and the
+  `PRETRAINED_MODELS_BASE_URL` config constant have been removed, and `get_available_pretrained_models` no longer
+  accepts the `include_hf` / `include_github` arguments (it now always queries the `materialyze` HF org).
+- Consolidated per-backend `tensornet` / `m3gnet` / `megnet` / `qet` test files; backend dispatch is via
+  `matgl.config.BACKEND` with `pytest.skip` guarding backend-specific cases.
+
+## 2.2.1
+- Updated HuggingFace Repo Id to lowercase "materialyze".
+
+## 2.2.0
 - Fixed an incorrect message-passing convention in the PyG and DGL `TensorNet` interaction and embedding blocks.
   Edge messages are now aggregated onto the source (center) node so that each atom correctly collects information
   from its neighbors. Pre-trained PyG `TensorNet` weights have been re-released to match the corrected convention.
   (#758, @kenko911)
 - Refreshed the PyG `TensorNet` README, added a missing `TrajectoryObserver`, improved `PESCalculator` stress-unit
   handling and logging, and tightened the related unit tests. (#758, @kenko911)
-- Reverted the experimental PyG ports of `QET`, `QETWarp`, and the PyG electrostatics modules pending further
-  validation; the DGL `QET` model remains the supported implementation.
 
 ## 2.1.2
 - Added Hugging Face Hub support for loading pre-trained models, with automatic fallback checking and respect for
@@ -22,12 +99,6 @@ nav_order: 3
 - Removed the deprecated `hubconf.py` (superseded by Hugging Face support).
 - Added `TensorNetWrapper` integrating the NVIDIA `nvalchemi-toolkit` for fully GPU-resident MD/Relax workflows,
   including an example script for NVT MD. (#754)
-- Added an example notebook for training a QET potential with PyTorch Lightning. (#742)
-- Added the QET-MatQ-PES FP dataset with accompanying README. (#743)
-- Added documentation on typical MatGL installation time for the DGL backend. (#741)
-- Bumped supported `torch` upper bound to `<=2.11.0`. (#746)
-- Upgraded `pymatgen-core` and refreshed `uv.lock`.
-- Test suite cleanup and improved coverage for IO utilities.
 
 ## 2.1.1
 - Merged `TensorNet` (PyG) and `TensorNetWarp` into a single `TensorNet` class with optional warp acceleration
