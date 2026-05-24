@@ -77,7 +77,7 @@ def pair_vector_and_distance(pos, edge_index, pbc_offshift):
 
 
 def tensor_embedding(params, cfg, z, edge_index, edge_attr, edge_weight, edge_vec, edge_mask):
-    """Port of ``matgl.layers._embedding_pyg.TensorEmbedding.forward``."""
+    """Port of ``matgl.layers._embedding.TensorEmbedding.forward``."""
     act = ACTIVATIONS[cfg["activation"]]
     p = params["tensor_embedding"]
     n_nodes = z.shape[0]
@@ -128,7 +128,7 @@ def tensor_embedding(params, cfg, z, edge_index, edge_attr, edge_weight, edge_ve
 
 
 def interaction(params, cfg, edge_index, edge_weight, edge_attr, x, edge_mask):
-    """Port of ``matgl.layers._graph_convolution_pyg.TensorNetInteraction.forward``."""
+    """Port of ``matgl.layers._graph_convolution.TensorNetInteraction.forward``."""
     act = ACTIVATIONS[cfg["activation"]]
     units = cfg["units"]
     n_nodes = x.shape[0]

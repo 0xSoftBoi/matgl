@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import typing
+import warnings
 from importlib.metadata import PackageNotFoundError, version
 
 import numpy as np
 import torch
 
-import matgl
-
-from .config import clear_cache, ensure_backend
+from .config import clear_cache
 from .utils.io import get_available_pretrained_models, load_model
-
-if typing.TYPE_CHECKING:
-    from typing import Literal
 
 try:
     __version__: str = version("matgl")
@@ -41,7 +37,6 @@ __all__ = [
     "MGLPotentialTrainer",
     "__version__",
     "clear_cache",
-    "ensure_backend",
     "float_np",
     "float_th",
     "get_available_pretrained_models",
@@ -74,30 +69,33 @@ def set_default_dtype(type_: str = "float", size: int = 32) -> None:
         )
 
 
-def set_backend(backend: Literal["DGL", "PYG"] = "PYG") -> None:
-    """Set the computational backend for the application.
-
-    Selects the backend used for graph computations, either "DGL" (Deep Graph Library)
-    or "PYG" (PyTorch Geometric). The selected backend determines how graph-based
-    computations are implemented in the application.
-
-    Args:
-        backend: A string specifying the desired computational backend. Must be either
-            "DGL" or "PYG".
-
-    Raises:
-        ValueError: If the input backend is neither "DGL" nor "PYG".
-    """
-    if backend not in ("DGL", "PYG"):
-        raise ValueError("Invalid backend")
-    ensure_backend(backend)
-    matgl.config.BACKEND = backend
-
-
-def get_best_device() -> Literal["cpu", "cuda", "mps"]:
+def get_best_device() -> typing.Literal["cpu", "cuda", "mps"]:
     """Get the best device for the current system."""
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def set_backend(backend: typing.Literal["DGL", "PYG"] = "PYG") -> None:
+    """Deprecated no-op stub retained for backwards compatibility.
+
+    Earlier versions of matgl supported selecting a graph backend -- DGL or PyTorch
+    Geometric -- through this function. The DGL backend has since been removed and
+    matgl now uses PyTorch Geometric exclusively. This stub is kept so existing code
+    that calls ``matgl.set_backend(...)`` continues to run without modification.
+
+    Args:
+        backend: Retained only for signature compatibility. Requesting ``"DGL"`` emits
+            a ``DeprecationWarning``; the value is otherwise ignored and PyTorch
+            Geometric is always used.
+    """
+    if str(backend).upper() == "DGL":
+        warnings.warn(
+            "The DGL backend no longer exists in matgl; PyTorch Geometric is now the "
+            "only backend and is used regardless of this call. matgl.set_backend() is a "
+            "no-op stub preserved for backwards compatibility.",
+            DeprecationWarning,
+            stacklevel=2,
+        )

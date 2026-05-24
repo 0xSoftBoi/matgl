@@ -1,6 +1,6 @@
 """JAX port of ``matgl.apps.pes.Potential`` (inference path: E, forces, stress).
 
-Reproduces the strain-based stress derivation of ``matgl.apps._pes_pyg.Potential``:
+Reproduces the strain-based stress derivation of ``matgl.apps._pes.Potential``:
 a symbolic strain ``eps`` is introduced, the lattice becomes ``lat @ (I + eps)``,
 and ``stress = (dE/d eps) / V``. Energy and gradients are produced by a single
 ``jax.value_and_grad`` under one ``jax.jit``.
@@ -14,7 +14,7 @@ import jax.numpy as jnp
 from ._qet import qet_energy
 from ._tensornet import scatter_add, tensornet_energy
 
-# 1 eV/A^3 = 160.21766208 GPa (matches matgl.apps._pes_pyg.EV_PER_ANG3_TO_GPA).
+# 1 eV/A^3 = 160.21766208 GPa (matches matgl.apps._pes.EV_PER_ANG3_TO_GPA).
 EV_PER_ANG3_TO_GPA = 160.21766208
 
 

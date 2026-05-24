@@ -163,7 +163,7 @@ def main() -> None:
     # eager-vs-JAX table. An explicit ``--variant warp`` still fails loudly.
     if args.variant == "all":
         try:
-            from matgl.models._tensornet_pyg import _warp_available
+            from matgl.models._tensornet import _warp_available
         except Exception:
             _warp_available = False
         if not _warp_available:

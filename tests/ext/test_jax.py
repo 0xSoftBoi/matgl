@@ -9,11 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-import matgl
-
-if matgl.config.BACKEND != "PYG":
-    pytest.skip("matgl.ext.jax is PyG-only", allow_module_level=True)
-
 jax = pytest.importorskip("jax", reason="matgl.ext.jax requires the optional 'jax' dependency")
 jax.config.update("jax_enable_x64", True)
 
@@ -24,7 +19,7 @@ from pymatgen.core import Lattice, Structure  # noqa: E402
 
 from matgl.apps.pes import Potential  # noqa: E402
 from matgl.config import DEFAULT_ELEMENTS  # noqa: E402
-from matgl.ext._pymatgen_pyg import Structure2Graph  # noqa: E402
+from matgl.ext._pymatgen import Structure2Graph  # noqa: E402
 from matgl.ext.jax import JAXPESCalculator, convert_potential, make_potential_fn  # noqa: E402
 from matgl.ext.jax._pad import pad_graph  # noqa: E402
 from matgl.models import QET, TensorNet  # noqa: E402
