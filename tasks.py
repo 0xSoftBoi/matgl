@@ -124,7 +124,7 @@ def release(ctx, version):
 
 
 def get_changelog(version):
-    with open("changes.md") as f:
+    with open("docs/changes.md") as f:
         contents = f.read()
         m = re.search(f"## {version}([^#]*)", contents)
         changes = m.group(1).strip()
