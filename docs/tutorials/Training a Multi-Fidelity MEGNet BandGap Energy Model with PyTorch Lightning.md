@@ -27,11 +27,11 @@ import pandas as pd
 import requests
 from dgl.data.utils import split_dataset
 from lightning.pytorch.loggers import CSVLogger
+from matgl.ext._pymatgen_dgl import Structure2Graph
+from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_graph
 from pymatgen.core import Structure
 
 from matgl.config import DEFAULT_ELEMENTS
-from matgl.ext._pymatgen_dgl import Structure2Graph
-from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_graph
 from matgl.models import MEGNet
 from matgl.utils.training import ModelLightningModule
 

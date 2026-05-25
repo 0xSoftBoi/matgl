@@ -28,13 +28,13 @@ import pandas as pd
 from m3gnet.models import M3GNet as M3GNet_tf
 from m3gnet.models import M3GNetCalculator as M3GNetCalculator_tf
 from m3gnet.models import Potential as Potential_tf
+from matgl.ext._ase_dgl import M3GNetCalculator as M3GNetCalculator_matgl
 from pymatgen.core import Composition, Lattice, Structure
 from pymatgen.ext.matproj import MPRester
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 import matgl
-from matgl.ext._ase_dgl import M3GNetCalculator as M3GNetCalculator_matgl
 
 warnings.filterwarnings("ignore")
 ```

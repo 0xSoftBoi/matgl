@@ -25,12 +25,12 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from matgl.ext._ase_dgl import Relaxer
 from pymatgen.core import Composition, Lattice, Structure
 from pymatgen.ext.matproj import MPRester
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 import matgl
-from matgl.ext._ase_dgl import Relaxer
 
 warnings.filterwarnings("ignore")
 ```

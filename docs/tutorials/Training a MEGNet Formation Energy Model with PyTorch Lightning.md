@@ -24,11 +24,11 @@ import requests
 import torch
 from dgl.data.utils import split_dataset
 from lightning.pytorch.loggers import CSVLogger
+from matgl.ext._pymatgen_dgl import Structure2Graph, get_element_list
+from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_graph
 from pymatgen.core import Structure
 from tqdm import tqdm
 
-from matgl.ext._pymatgen_dgl import Structure2Graph, get_element_list
-from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_graph
 from matgl.layers import BondExpansion
 from matgl.models import MEGNet
 from matgl.utils.training import ModelLightningModule

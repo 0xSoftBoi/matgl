@@ -19,9 +19,9 @@ import warnings
 
 from ase.build import molecule
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
+from matgl.ext._ase_dgl import MolecularDynamics, PESCalculator, Relaxer
 
 import matgl
-from matgl.ext._ase_dgl import MolecularDynamics, PESCalculator, Relaxer
 
 # To suppress warnings for clearer output
 warnings.simplefilter("ignore")

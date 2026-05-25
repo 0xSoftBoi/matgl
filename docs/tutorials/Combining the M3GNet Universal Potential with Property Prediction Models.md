@@ -17,11 +17,11 @@ from __future__ import annotations
 import warnings
 
 import torch
+from matgl.ext._ase_dgl import Relaxer
 from pymatgen.core import Lattice, Structure
 from pymatgen.ext.matproj import MPRester
 
 import matgl
-from matgl.ext._ase_dgl import Relaxer
 
 # To suppress warnings for clearer output
 warnings.simplefilter("ignore")

@@ -21,15 +21,16 @@ import lightning as L
 import numpy as np
 from dgl.data.utils import split_dataset
 from lightning.pytorch.loggers import CSVLogger
-from mp_api.client import MPRester
-
-import matgl
-matgl.config.BACKEND = "DGL":
-from matgl.config import DEFAULT_ELEMENTS
 from matgl.ext._pymatgen_dgl import Structure2Graph
 from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_pes
 from matgl.models._qet_dgl import QET
+from mp_api.client import MPRester
+
+import matgl
+from matgl.config import DEFAULT_ELEMENTS
 from matgl.utils.training import PotentialLightningModule
+
+matgl.config.BACKEND = "DGL"
 
 # To suppress warnings for clearer output
 warnings.simplefilter("ignore")

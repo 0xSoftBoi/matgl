@@ -21,12 +21,12 @@ import lightning as L
 import numpy as np
 from dgl.data.utils import split_dataset
 from lightning.pytorch.loggers import CSVLogger
+from matgl.ext._pymatgen_dgl import Structure2Graph
+from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_pes
 from mp_api.client import MPRester
 
 import matgl
 from matgl.config import DEFAULT_ELEMENTS
-from matgl.ext._pymatgen_dgl import Structure2Graph
-from matgl.graph._data_dgl import MGLDataLoader, MGLDataset, collate_fn_pes
 from matgl.utils.training import PotentialLightningModule
 
 try:

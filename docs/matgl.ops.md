@@ -6,7 +6,6 @@ nav_exclude: true
 
 # matgl.ops package
 
-
 ## matgl.ops.compose_tensor module
 
 ## matgl.ops.decompose_tensor module

@@ -6,7 +6,6 @@ nav_exclude: true
 
 # matgl.kernels package
 
-
 ## matgl.kernels.compose_tensor module
 
 ## matgl.kernels.decompose_tensor module
