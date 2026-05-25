@@ -236,14 +236,16 @@ community [`applejax`](https://github.com/danielpcox/applejax) PJRT plugin
 via MLX. Benchmarks on an M5 Pro for **TensorNet** (energy + forces + stress
 per step) show:
 
-| Atoms |       PyTorch MPS |          JAX CPU |       **JAX Metal** |
-| ----: | ----------------: | ---------------: | ------------------: |
-|     2 |           9.7 ms  |     **1.9 ms**   |             8.5 ms  |
-|    64 |          19.9 ms  |     **6.6 ms**   |            12.6 ms  |
-|   216 |          24.8 ms  |        18.0 ms   |        **17.9 ms**  |
-|   512 |          52.4 ms  |        35.9 ms   |        **31.2 ms**  |
-|  1000 |         100.6 ms  |        72.9 ms   |        **57.7 ms**  |
-|  5832 |         591.9 ms  |       708.5 ms   |       **437.7 ms**  |
+Speedups relative to PyTorch CPU are shown in brackets.
+
+| Atoms |   PyTorch CPU |      PyTorch MPS |             JAX CPU |       **JAX Metal** |
+| ----: | ------------: | ---------------: | ------------------: | ------------------: |
+|     2 |        4.9 ms |  9.7 ms (0.50x)  |  **1.9 ms (2.62x)** |     8.5 ms (0.57x)  |
+|    64 |       22.5 ms | 19.9 ms (1.13x)  |  **6.6 ms (3.43x)** |    12.6 ms (1.79x)  |
+|   216 |       48.3 ms | 24.8 ms (1.95x)  |     18.0 ms (2.69x) | **17.9 ms (2.70x)** |
+|   512 |       96.5 ms | 52.4 ms (1.84x)  |     35.9 ms (2.69x) | **31.2 ms (3.09x)** |
+|  1000 |      189.6 ms | 100.6 ms (1.88x) |     72.9 ms (2.60x) | **57.7 ms (3.29x)** |
+|  5832 |     1057.6 ms | 591.9 ms (1.79x) |    708.5 ms (1.49x) | **437.7 ms (2.42x)** |
 
 JAX-Metal wins from ~500 atoms upward (1.3-1.7x over PyTorch MPS); JAX-CPU is
 the fastest path for small cells. A 1 ps NVE MD on LiFePO4 with
