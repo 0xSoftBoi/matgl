@@ -220,6 +220,35 @@ atoms.calc = JAXPESCalculator(potential, stress_unit="eV/A3")  # any ASE Atoms
 Energies, forces and stresses match the PyTorch reference to float64 precision. The backend is inference-only and
 PyG-only; training still goes through the standard PyTorch path. See `dev/jax_benchmark.py` for the benchmark harness.
 
+#### Apple Silicon (Metal GPU)
+
+On Apple Silicon the JAX backend is the recommended inference path. With the
+community [`applejax`](https://github.com/danielpcox/applejax) PJRT plugin
+(`pip install applejax`), the same `JAXPESCalculator` runs on the Metal GPU
+via MLX. Benchmarks on an M5 Pro for **TensorNet** (energy + forces + stress
+per step) show:
+
+| Atoms |       PyTorch MPS |          JAX CPU |       **JAX Metal** |
+| ----: | ----------------: | ---------------: | ------------------: |
+|     2 |           9.7 ms  |     **1.9 ms**   |             8.5 ms  |
+|    64 |          19.9 ms  |     **6.6 ms**   |            12.6 ms  |
+|   216 |          24.8 ms  |        18.0 ms   |        **17.9 ms**  |
+|   512 |          52.4 ms  |        35.9 ms   |        **31.2 ms**  |
+|  1000 |         100.6 ms  |        72.9 ms   |        **57.7 ms**  |
+|  5832 |         591.9 ms  |       708.5 ms   |       **437.7 ms**  |
+
+JAX-Metal wins from ~500 atoms upward (1.3-1.7x over PyTorch MPS); JAX-CPU is
+the fastest path for small cells. A 1 ps NVE MD on LiFePO4 with
+`TensorNet-PES-MatPES-r2SCAN-2025.2` shows energy drift of 0.0007 meV/atom/ps
+on JAX-Metal vs 0.0006 meV/atom/ps on PyTorch-CPU (statistically identical).
+
+Caveats: `applejax` is float32-only (the existing float64 parity tests are
+relaxed automatically) and pins `jaxlib==0.9.x`, so install it in a separate
+venv from the main matgl dev environment. **QET is not yet supported on
+JAX-Metal** -- the Gaussian-smeared Coulomb potential uses `jax.scipy.special.erf`,
+which `applejax` currently lowers to an unsupported `stablehlo.composite` op
+([applejax issue](https://github.com/danielpcox/applejax/issues)).
+
 ## Model Training
 
 In the PES training, the unit of energies, forces and stresses (optional) in the training, validation and test sets is extremely important to be consistent with the unit used in MatGL.

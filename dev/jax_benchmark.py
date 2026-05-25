@@ -38,7 +38,7 @@ PROPS = ["energy", "forces", "stress"]
 _SI_CONV = Structure.from_spacegroup("Fd-3m", Lattice.cubic(5.43), ["Si"], [[0.0, 0.0, 0.0]])  # 8 atoms
 
 
-def make_structures(include_xlarge: bool = False) -> dict[str, Structure]:
+def make_structures(include_xlarge: bool = False, include_xxlarge: bool = False) -> dict[str, Structure]:
     """Return ``name -> Structure`` covering a range of system sizes."""
     out: dict[str, Structure] = {
         "tiny-2": Structure(Lattice.cubic(3.0), ["Si", "Si"], [[0, 0, 0], [0.5, 0.5, 0.5]]),
@@ -47,10 +47,14 @@ def make_structures(include_xlarge: bool = False) -> dict[str, Structure]:
         s = _SI_CONV.copy()
         s.make_supercell([mult, mult, mult])
         out[label] = s
-    if include_xlarge:
+    if include_xlarge or include_xxlarge:
         s = _SI_CONV.copy()
         s.make_supercell([5, 5, 5])
         out["xlarge-1000"] = s
+    if include_xxlarge:
+        s = _SI_CONV.copy()
+        s.make_supercell([9, 9, 9])
+        out["xxlarge-5832"] = s
     return out
 
 
@@ -80,6 +84,8 @@ def build_potential(
 def _cuda_sync(device: str) -> None:
     if device == "cuda" and torch.cuda.is_available():
         torch.cuda.synchronize()
+    elif device == "mps" and torch.backends.mps.is_available():
+        torch.mps.synchronize()
 
 
 def time_calc(calc, atoms, n_warmup: int, n_iter: int, device: str = "cpu") -> tuple[float, float]:
@@ -133,12 +139,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda"],
+        choices=["cpu", "cuda", "mps"],
         default="cpu",
         help="Torch device for the eager and warp variants. JAX uses its own device picker.",
     )
     parser.add_argument("--torch-compile", action="store_true", help="also benchmark torch.compile")
     parser.add_argument("--xlarge", action="store_true", help="include the ~1000-atom cell")
+    parser.add_argument("--xxlarge", action="store_true", help="include the ~5000-atom cell (implies --xlarge)")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
     parser.add_argument(
@@ -155,6 +162,8 @@ def main() -> None:
 
     if args.device == "cuda" and not torch.cuda.is_available():
         raise SystemExit("--device=cuda requested but torch.cuda.is_available() is False")
+    if args.device == "mps" and not torch.backends.mps.is_available():
+        raise SystemExit("--device=mps requested but torch.backends.mps.is_available() is False")
 
     want = {"eager", "warp", "jax"} if args.variant == "all" else {args.variant}
 
@@ -191,7 +200,7 @@ def main() -> None:
         print(f"jax devices: {info['jax_devices']}")
 
     rows = []
-    for name, struct in make_structures(include_xlarge=args.xlarge).items():
+    for name, struct in make_structures(include_xlarge=args.xlarge, include_xxlarge=args.xxlarge).items():
         atoms = AseAtomsAdaptor.get_atoms(struct)
         n_atoms = len(atoms)
         row: dict = {"system": name, "atoms": n_atoms}
