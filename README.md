@@ -109,11 +109,11 @@ MatGL can be installed via pip:
 pip install matgl
 ```
 
-To enable the optional [JAX-accelerated inference backend](#jax-accelerated-inference-experimental), install the `jax`
-extra:
+Two optional [acceleration backends](#acceleration-backends) are available — pick one based on your hardware:
 
 ```bash
-pip install matgl[jax]
+pip install matgl[ops]    # NVIDIA Warp kernels for TensorNet/QET (NVIDIA GPU, train + infer)
+pip install matgl[jax]    # JAX/XLA inference for TensorNet/QET (CPU / CUDA / Apple Silicon)
 ```
 
 ## Docker images
@@ -197,6 +197,65 @@ struct = Structure.from_spacegroup("Pm-3m", Lattice.cubic(4.1437), ["Cs", "Cl"],
 eform = model.predict_structure(struct)
 print(f"The predicted formation energy for CsCl is {float(eform.numpy()):.3f} eV/atom.")
 ```
+
+## Acceleration backends
+
+By default, matgl runs `TensorNet` / `QET` in eager PyTorch on whichever device the model lives on. Two optional
+backends accelerate the inner loop of MD and relaxation: **NVIDIA Warp** (training + inference, NVIDIA GPU only)
+and **JAX** (inference only, portable across CPU / CUDA / Apple Silicon). They are mutually exclusive — pick one
+based on the hardware and workflow.
+
+| Backend         | Install                  | Hardware             | Training | Inference | Models          | Typical speedup vs eager PyTorch    |
+| --------------- | ------------------------ | -------------------- | -------- | --------- | --------------- | ----------------------------------- |
+| PyTorch (default) | `pip install matgl`      | CPU / CUDA / MPS     | yes      | yes       | all             | 1x baseline                         |
+| **Warp**        | `pip install matgl[ops]` | NVIDIA GPU (CUDA)    | yes      | yes       | TensorNet / QET | ~2-3x speed + memory at train+infer |
+| **JAX**         | `pip install matgl[jax]` | CPU / CUDA / Metal   | no       | yes       | TensorNet / QET | ~2-3.5x at inference                |
+
+**How to choose:**
+
+- **Training a TensorNet / QET on an NVIDIA GPU** — install the `[ops]` extra and use Warp. It is the only backend
+  that accelerates the *training* loop, and it cuts memory as well as wall time. `MGLPotentialTrainer` and the
+  models pick it up automatically; pass `use_warp=False` only if you need to fall back.
+- **Production MD or relaxation on an NVIDIA GPU** — Warp is still usually the right answer because it covers the
+  full forward+backward and is auto-detected. Try JAX if you want a single fused XLA program (e.g. for very long
+  trajectories with the same cell size) and want to compare.
+- **Inference on Apple Silicon, CPU-only nodes, or non-CUDA accelerators** — use JAX (`[jax]` extra). It is the
+  only accelerated path on Metal and is typically the fastest path on CPU. See the [JAX subsection](#jax-accelerated-inference-experimental)
+  for the `applejax` Metal plugin and Apple-Silicon benchmarks.
+- **Other architectures (MEGNet, CHGNet, SO3Net, M3GNet)** — neither extra applies; eager PyTorch is the path.
+- **Training on non-NVIDIA hardware** — eager PyTorch on the available device. JAX does not yet cover the training
+  path in matgl.
+
+### Warp-accelerated TensorNet / QET (NVIDIA GPU)
+
+Warp acceleration is provided by the [`nvalchemi-toolkit-ops`](https://pypi.org/project/nvalchemi-toolkit-ops/)
+package, contributed by the NVIDIA Alchemi team. It replaces the PyG message-passing layers in `TensorNet` (and
+therefore in `QET`, which composes a TensorNet) with hand-written NVIDIA Warp CUDA kernels for the embedding,
+interaction, and tensor decomposition / composition steps, yielding **~2-3x speed and memory reduction** in both
+training and inference relative to the plain PyG path.
+
+Install the extra:
+
+```bash
+pip install matgl[ops]
+```
+
+Once installed, every newly constructed `TensorNet` / `QET` autodetects Warp and uses it:
+
+```python
+from matgl.models import TensorNet
+
+# Warp is used automatically when nvalchemi-toolkit-ops is importable.
+model = TensorNet(element_types=("H", "C", "N", "O"))
+
+# Force the plain PyG implementation for debugging / parity tests.
+model_pyg = TensorNet(element_types=("H", "C", "N", "O"), use_warp=False)
+```
+
+A loaded pre-trained `Potential` works the same way — `matgl.load_model("TensorNet-PES-MatPES-r2SCAN-2025.2")` will
+use Warp kernels under the hood whenever the extra is present, with no code change in `PESCalculator` /
+`MolecularDynamics` / `Relaxer`. Warp requires an NVIDIA GPU at run time; on CPU-only or non-CUDA devices, leave
+the extra uninstalled (or pass `use_warp=False`) and use the JAX path below instead.
 
 ### JAX-accelerated inference (experimental)
 
