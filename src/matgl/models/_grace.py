@@ -361,7 +361,7 @@ class GRACE(MatGLModel):
         """
         del state_feats
         if graph_converter is None:
-            from matgl.ext._pymatgen import Structure2Graph
+            from matgl.ext.pymatgen import Structure2Graph
 
             graph_converter = Structure2Graph(element_types=self.element_types, cutoff=self.cutoff)  # type: ignore[arg-type]
         graph, lattice, _ = graph_converter.get_graph(structure)

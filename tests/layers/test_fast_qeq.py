@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import torch
 
 import matgl
-from matgl.electrostatics._fast_qeq import LinearQeq as LinearQeqPyG
+from matgl.layers import LinearQeq
 
 
 def test_qeq_pyg_two_atoms_analytic():
@@ -21,7 +21,7 @@ def test_qeq_pyg_two_atoms_analytic():
 
     g = SimpleNamespace(batch=torch.zeros(2, dtype=torch.long), num_graphs=1)
 
-    out = LinearQeqPyG()(g, total_charge, chi, hardness)
+    out = LinearQeq()(g, total_charge, chi, hardness)
     assert torch.allclose(out, expected, atol=1e-6)
 
 
@@ -35,7 +35,7 @@ def test_qeq_pyg_batch_charge_conservation():
 
     g = SimpleNamespace(batch=batch, num_graphs=3)
 
-    charges = LinearQeqPyG()(g, total_charge, chi, hardness)
+    charges = LinearQeq()(g, total_charge, chi, hardness)
     summed = torch.zeros(3, dtype=matgl.float_th).scatter_add_(0, batch, charges)
     assert torch.allclose(summed, total_charge, atol=1e-6)
 
@@ -48,7 +48,7 @@ def test_qeq_pyg_q_ref_overrides_total_charge():
 
     g = SimpleNamespace(batch=torch.tensor([0, 0, 1], dtype=torch.long), num_graphs=2, q_ref=q_ref)
 
-    charges = LinearQeqPyG()(g, total_charge=torch.tensor([99.0, 99.0]), chi=chi, hardness=hardness)
+    charges = LinearQeq()(g, total_charge=torch.tensor([99.0, 99.0]), chi=chi, hardness=hardness)
     summed = torch.zeros(2, dtype=matgl.float_th).scatter_add_(0, g.batch, charges)
     expected = torch.tensor([0.8, -1.0], dtype=matgl.float_th)
     assert torch.allclose(summed, expected, atol=1e-6)

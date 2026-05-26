@@ -7,8 +7,8 @@ from pymatgen.core import Lattice, Structure
 from torch_geometric.data import Batch
 
 import matgl
-from matgl.apps._pes import Potential
-from matgl.ext._pymatgen import Structure2Graph, get_element_list
+from matgl.apps.pes import Potential
+from matgl.ext.pymatgen import Structure2Graph, get_element_list
 from matgl.models._tensornet import TensorNet
 
 

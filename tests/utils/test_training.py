@@ -15,10 +15,9 @@ import pytest
 import torch.backends.mps
 from pymatgen.core import Lattice, Structure
 
-from matgl.ext._pymatgen import Structure2Graph, get_element_list
-from matgl.graph._data import MGLDataLoader, MGLDataset, collate_fn_pes, split_dataset
-from matgl.models._qet import QET
-from matgl.models._tensornet import TensorNet
+from matgl.ext.pymatgen import Structure2Graph, get_element_list
+from matgl.graph.data import MGLDataLoader, MGLDataset, collate_fn_pes, split_dataset
+from matgl.models import QET, TensorNet
 from matgl.utils.training import (
     ModelLightningModule,
     PotentialLightningModule,
@@ -535,7 +534,7 @@ def test_model_lightning_module_forward_and_step(LiFePO4, BaNiO3):
         save_cache=False,
     )
     # Manually batch the dataset to avoid creating a Lightning Trainer.
-    from matgl.graph._data import collate_fn_graph
+    from matgl.graph.data import collate_fn_graph
 
     batch = collate_fn_graph([dataset[0], dataset[1]])
     g, lat, state_attr, _label_tensor = batch

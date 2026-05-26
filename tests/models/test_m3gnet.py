@@ -9,7 +9,7 @@ import torch
 from pymatgen.core import Structure
 
 import matgl
-from matgl.ext._pymatgen import Structure2Graph
+from matgl.ext.pymatgen import Structure2Graph
 from matgl.graph._compute import compute_pair_vector_and_distance
 from matgl.models import M3GNet
 

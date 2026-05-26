@@ -42,10 +42,10 @@ from nvalchemi.hooks import HookContext, NeighborListHook
 from pymatgen.core import Element
 
 import matgl
-from matgl.apps._pes import Potential
+from matgl.apps.pes import Potential
 from matgl.ext.alchmtk import TensorNetWrapper
 from matgl.graph._compute import compute_pair_vector_and_distance
-from matgl.models._tensornet import TensorNet
+from matgl.models import TensorNet
 
 # 1 eV/A^3 = 160.21766208 GPa
 EV_A3_TO_GPA = 160.21766208
@@ -452,7 +452,7 @@ class TestEndToEnd:
     def test_neighborlist_distances_match(self, potential, MoS):
         """NeighborListHook and matgl's Structure2Graph produce the same
         pairwise distances (order may differ)."""
-        from matgl.ext._pymatgen import Structure2Graph
+        from matgl.ext.pymatgen import Structure2Graph
 
         cutoff = float(potential.model.cutoff)
         element_types = ("Mo", "S")
@@ -505,7 +505,7 @@ class TestEndToEnd:
     def test_energy_forces_end_to_end(self, potential, MoS):
         """Full pipeline: AtomicData.from_structure -> NeighborListHook -> wrapper
         vs matgl's Potential. Energies and forces should match."""
-        from matgl.ext._pymatgen import Structure2Graph
+        from matgl.ext.pymatgen import Structure2Graph
 
         cutoff = float(potential.model.cutoff)
         element_types = ("Mo", "S")

@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from pymatgen.core import Lattice, Structure
 
-from matgl.ext._pymatgen import Structure2Graph
+from matgl.ext.pymatgen import Structure2Graph
 from matgl.models import M3GNet
 
 INIT_ARGS: dict = {

@@ -86,10 +86,10 @@ def test_get_element_list():
 
 
 def _build_graph_without_alchmtk(structure_or_mol, cutoff, monkeypatch):
-    """Force the scipy/pymatgen fallback branches in ``matgl.ext._pymatgen`` and convert."""
-    from matgl.ext import _pymatgen as mod
-    from matgl.ext._pymatgen import Molecule2Graph as M2G_local
-    from matgl.ext._pymatgen import Structure2Graph as S2G_local
+    """Force the scipy/pymatgen fallback branches in ``matgl.ext.pymatgen`` and convert."""
+    from matgl.ext import pymatgen as mod
+    from matgl.ext.pymatgen import Molecule2Graph as M2G_local
+    from matgl.ext.pymatgen import Structure2Graph as S2G_local
 
     monkeypatch.setattr(mod, "_alchmtk_available", False)
     elements = get_element_list([structure_or_mol])

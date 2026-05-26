@@ -20,10 +20,7 @@ from torch import nn
 
 import matgl
 from matgl.config import DEFAULT_ELEMENTS
-from matgl.electrostatics._elec_pot import ElectrostaticPotential
-from matgl.electrostatics._fast_qeq import LinearQeq
-from matgl.layers import MLP
-from matgl.layers._readout_torch import WeightedReadOut
+from matgl.layers import MLP, ElectrostaticPotential, LinearQeq, WeightedReadOut
 from matgl.utils.maths import scatter_add
 
 from ._core import _warn_feature_dict_kwarg
@@ -286,7 +283,7 @@ class QET(TensorNet):
             output (torch.Tensor): output property
         """
         if graph_converter is None:
-            from matgl.ext._pymatgen import Structure2Graph
+            from matgl.ext.pymatgen import Structure2Graph
 
             graph_converter = Structure2Graph(element_types=self.element_types, cutoff=self.cutoff)  # type: ignore
         g, lat, state_feats_default = graph_converter.get_graph(structure)

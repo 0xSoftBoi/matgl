@@ -48,7 +48,12 @@ Docs/release helpers live in `tasks.py` (`invoke make-docs`, `invoke release <ve
 
 ## Architecture
 
-matgl uses PyTorch Geometric (PyG) exclusively as its graph backend.
+matgl uses PyTorch Geometric (PyG) exclusively as its graph backend. DGL is no longer
+supported — all DGL code paths, backend-selection stubs, and compatibility shims have
+been removed from the codebase. Do not reintroduce DGL imports, `MGL_BACKEND`-style
+switches, or any abstraction that suggests multiple graph backends; PyG is the only
+backend, and code/tests should assume PyG types (`torch_geometric.data.Data`,
+`Batch`) directly.
 
 ### Public-vs-private convention (sklearn-style)
 

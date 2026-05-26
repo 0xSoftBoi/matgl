@@ -297,7 +297,7 @@ def test_warp_pyg_parity_pretrained(structure_fixture, request):
     structure = request.getfixturevalue(structure_fixture)
     model_warp, model_pyg = _build_pair_from_pretrained("materialyze/TensorNet-PES-MatPES-PBE-2025.2")
 
-    from matgl.ext._pymatgen import Structure2Graph
+    from matgl.ext.pymatgen import Structure2Graph
 
     converter = Structure2Graph(element_types=model_pyg.element_types, cutoff=model_pyg.cutoff)
     g, lat, _ = converter.get_graph(structure)

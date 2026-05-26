@@ -9,7 +9,7 @@ import torch
 
 import matgl
 from matgl.config import COULOMB_CONSTANT
-from matgl.electrostatics._elec_pot import ElectrostaticPotential as ElectrostaticPotentialPyG
+from matgl.layers import ElectrostaticPotential
 from matgl.utils.cutoff import polynomial_cutoff
 
 
@@ -26,7 +26,7 @@ def test_elec_pot_pyg_two_atoms_against_analytic():
     sigma = torch.tensor([0.5, 0.6], dtype=matgl.float_th)
 
     g = _make_pyg_graph(pos, edge_index)
-    out = ElectrostaticPotentialPyG(element_types=("X", "Y"), cutoff=cutoff)(g, charge=charge, sigma=sigma)
+    out = ElectrostaticPotential(element_types=("X", "Y"), cutoff=cutoff)(g, charge=charge, sigma=sigma)
 
     r = float(torch.linalg.norm(pos[0] - pos[1]))
     gamma = math.sqrt(0.5**2 + 0.6**2)
@@ -45,7 +45,7 @@ def test_elec_pot_pyg_zero_charges_give_zero_potential():
     sigma = torch.tensor([0.5, 0.5, 0.5], dtype=matgl.float_th)
 
     g = _make_pyg_graph(pos, edge_index)
-    out = ElectrostaticPotentialPyG(element_types=("X",), cutoff=5.0)(g, charge=charge, sigma=sigma)
+    out = ElectrostaticPotential(element_types=("X",), cutoff=5.0)(g, charge=charge, sigma=sigma)
     assert torch.allclose(out, torch.zeros_like(out))
 
 
@@ -57,7 +57,7 @@ def test_elec_pot_pyg_gradient_flow():
     sigma = torch.tensor([0.5, 0.5], dtype=torch.double)
 
     g = _make_pyg_graph(pos, edge_index)
-    module = ElectrostaticPotentialPyG(element_types=("X",), cutoff=5.0).double()
+    module = ElectrostaticPotential(element_types=("X",), cutoff=5.0).double()
     out = module(g, charge=charge, sigma=sigma).sum()
     out.backward()
     assert pos.grad is not None

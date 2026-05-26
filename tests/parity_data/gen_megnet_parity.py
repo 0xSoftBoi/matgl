@@ -17,7 +17,7 @@ import torch
 from pymatgen.core import Lattice, Structure
 
 import matgl
-from matgl.ext._pymatgen import Structure2Graph
+from matgl.ext.pymatgen import Structure2Graph
 from matgl.models import MEGNet
 
 # Architecture / forward inputs MUST stay in lockstep with the consumer test.

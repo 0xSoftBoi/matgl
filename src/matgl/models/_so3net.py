@@ -397,7 +397,7 @@ class SO3Net(MatGLModel):
             output (torch.tensor): output property
         """
         if graph_converter is None:
-            from matgl.ext._pymatgen import Structure2Graph
+            from matgl.ext.pymatgen import Structure2Graph
 
             graph_converter = Structure2Graph(element_types=self.element_types, cutoff=self.cutoff)  # type: ignore
         g, lat, state_feats_default = graph_converter.get_graph(structure)

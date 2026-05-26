@@ -9,8 +9,8 @@ from pymatgen.core import Lattice, Structure
 from torch_geometric.data import Batch
 
 import matgl
-from matgl.apps._pes import Potential
-from matgl.ext._pymatgen import Structure2Graph
+from matgl.apps.pes import Potential
+from matgl.ext.pymatgen import Structure2Graph
 from matgl.models._chgnet import CHGNet
 
 # ---------------------------------------------------------------------------
@@ -349,7 +349,7 @@ class TestCHGNetPotential:
 
     def test_with_zbl_repulsion(self, mos_structure, default_model):
         """ZBL needs bond_dist on the graph — Potential builds it from pos."""
-        from matgl.ext._pymatgen import Structure2Graph
+        from matgl.ext.pymatgen import Structure2Graph
         from matgl.graph._compute import compute_pair_vector_and_distance
 
         conv = Structure2Graph(element_types=default_model.element_types, cutoff=default_model.cutoff)
@@ -380,7 +380,7 @@ class TestCHGNetPotential:
 class TestCHGNetTraining:
     def _fresh_graph(self, structure, model):
         """Build a fresh graph with requires_grad=False on pos to avoid double-backward."""
-        from matgl.ext._pymatgen import Structure2Graph
+        from matgl.ext.pymatgen import Structure2Graph
 
         conv = Structure2Graph(element_types=model.element_types, cutoff=model.cutoff)
         g, lat, state = conv.get_graph(structure)

@@ -1,12 +1,22 @@
-"""Electrostatics module for MatGL.
+"""Deprecated alias for :mod:`matgl.layers`.
 
-Exposes :class:`LinearQeq` charge-equilibration solver and
-:class:`ElectrostaticPotential` aggregator used by the QET model.
+All electrostatics layers (:class:`ElectrostaticPotential` and
+:class:`LinearQeq`) have been moved to :mod:`matgl.layers`. Importing from
+:mod:`matgl.electrostatics` is deprecated and will be removed in a future
+release.
 """
 
 from __future__ import annotations
 
-from ._elec_pot import ElectrostaticPotential
-from ._fast_qeq import LinearQeq
+import warnings
+
+from matgl.layers import ElectrostaticPotential, LinearQeq
+
+warnings.warn(
+    "matgl.electrostatics is deprecated and will be removed in a future release. "
+    "Import ElectrostaticPotential and LinearQeq from matgl.layers instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 __all__ = ["ElectrostaticPotential", "LinearQeq"]

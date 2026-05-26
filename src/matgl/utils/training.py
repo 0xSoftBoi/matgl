@@ -15,7 +15,7 @@ from monty.serialization import loadfn
 from pymatgen.core import Structure
 from torch import nn
 
-from matgl.apps._pes import Potential
+from matgl.apps.pes import Potential
 from matgl.config import MATGL_CACHE
 
 if TYPE_CHECKING:
@@ -717,7 +717,7 @@ def fit_element_refs(
 
     Note:
         For inputs already in graph form (e.g. an
-        :class:`~matgl.graph._data.MGLDataset` of PyG ``Data``
+        :class:`~matgl.graph.data.MGLDataset` of PyG ``Data``
         objects), :meth:`matgl.layers.AtomRef.fit` provides the same
         regression directly on the layer.
 

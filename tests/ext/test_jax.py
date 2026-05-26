@@ -19,9 +19,9 @@ from pymatgen.core import Lattice, Structure  # noqa: E402
 
 from matgl.apps.pes import Potential  # noqa: E402
 from matgl.config import DEFAULT_ELEMENTS  # noqa: E402
-from matgl.ext._pymatgen import Structure2Graph  # noqa: E402
 from matgl.ext.jax import JAXPESCalculator, convert_potential, make_potential_fn  # noqa: E402
 from matgl.ext.jax._pad import pad_graph  # noqa: E402
+from matgl.ext.pymatgen import Structure2Graph  # noqa: E402
 from matgl.models import QET, TensorNet  # noqa: E402
 
 CUTOFF = 5.0

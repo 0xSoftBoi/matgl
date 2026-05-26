@@ -408,7 +408,7 @@ class TensorNet(MatGLModel):
             raise ValueError(f"Invalid output_layers, it must be a sublist of {allowed_output_layers}.")
 
         if graph_converter is None:
-            from matgl.ext._pymatgen import Structure2Graph
+            from matgl.ext.pymatgen import Structure2Graph
 
             graph_converter = Structure2Graph(element_types=self.element_types, cutoff=self.cutoff)  # type: ignore
         g, lat, state_feats_default = graph_converter.get_graph(structure)

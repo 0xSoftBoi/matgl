@@ -230,7 +230,7 @@ class MEGNet(MatGLModel):
         import matgl
 
         if graph_converter is None:
-            from matgl.ext._pymatgen import Structure2Graph
+            from matgl.ext.pymatgen import Structure2Graph
 
             graph_converter = Structure2Graph(element_types=self.element_types, cutoff=self.cutoff)
         g, lat, state_attr_default = graph_converter.get_graph(structure)

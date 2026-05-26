@@ -73,3 +73,6 @@ from matgl.layers._readout import (
 )
 from matgl.layers._three_body import ThreeBodyInteractions
 from matgl.layers._zbl import NuclearRepulsion
+
+from ._elec_pot import ElectrostaticPotential
+from ._fast_qeq import LinearQeq
