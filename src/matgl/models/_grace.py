@@ -249,6 +249,10 @@ class GRACE(MatGLModel):
     def forward(self, g: Any, state_attr: torch.Tensor | None = None, **kwargs: Any) -> torch.Tensor:
         """Compute the total energy of a (possibly batched) PyG graph.
 
+        Intermediate features (``basis_values``, per-block ``a_node_<k>`` /
+        ``equivariants_<k>`` / ``invariants_<k>``, ``atomic_energies``, ``final``) are
+        stored on ``self.feature_dict`` after every call.
+
         Args:
             g: PyG ``Data`` / ``Batch`` with ``node_type``, ``pos``,
                 ``edge_index`` and (for periodic systems) ``pbc_offshift``.
@@ -278,6 +282,8 @@ class GRACE(MatGLModel):
         # the per-block loop (every block's ``self.radial_basis[k]`` points
         # at the same shared module).
         basis_values = self.radial_basis[0](bond_dist)
+
+        fea_dict: dict = {"basis_values": basis_values}
 
         atomic_energies = torch.zeros(num_nodes, dtype=pos.dtype, device=pos.device)
         indicator: torch.Tensor | None = None
@@ -310,19 +316,29 @@ class GRACE(MatGLModel):
             invariants = collect_invariants(equivariants)
             atomic_energies = atomic_energies + self.readout[k](invariants).view(-1)
 
+            fea_dict[f"a_node_{k + 1}"] = a_node
+            fea_dict[f"equivariants_{k + 1}"] = equivariants
+            fea_dict[f"invariants_{k + 1}"] = invariants
+
             # Build the equivariant indicator for the next block.
             if k < self.nblocks - 1:
                 equiv_concat = torch.cat([t[:, :keep, :] for t in equivariants], dim=-1)
                 indicator = self.indicator_mix[k](equiv_concat)
 
+        fea_dict["atomic_energies"] = atomic_energies
+
         batch = getattr(g, "batch", None)
         num_graphs = getattr(g, "num_graphs", None)
         if batch is None:
-            return atomic_energies.sum()
-        batch_long = batch.to(torch.long)
-        if num_graphs is None:
-            num_graphs = int(batch_long.max().item()) + 1
-        return scatter_add(atomic_energies, batch_long, dim_size=num_graphs)
+            output = atomic_energies.sum()
+        else:
+            batch_long = batch.to(torch.long)
+            if num_graphs is None:
+                num_graphs = int(batch_long.max().item()) + 1
+            output = scatter_add(atomic_energies, batch_long, dim_size=num_graphs)
+        fea_dict["final"] = output
+        self.feature_dict = fea_dict
+        return output
 
     def predict_structure(
         self,

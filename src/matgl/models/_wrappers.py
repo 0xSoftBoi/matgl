@@ -40,6 +40,9 @@ class TransformedTargetModel(MatGLModel):
     def forward(self, *args, **kwargs):
         """Run the wrapped model and inverse-transform the output.
 
+        After the call, ``self.feature_dict`` mirrors the wrapped model's ``feature_dict``
+        (when the wrapped model exposes one).
+
         Args:
             *args: Passthrough to parent model.forward method.
             **kwargs: Passthrough to parent model.forward method.
@@ -48,6 +51,7 @@ class TransformedTargetModel(MatGLModel):
             Inverse transformed output.
         """
         output = self.model.forward(*args, **kwargs)
+        self.feature_dict = getattr(self.model, "feature_dict", {})
         return self.transformer.inverse_transform(output)
 
     def __repr__(self):

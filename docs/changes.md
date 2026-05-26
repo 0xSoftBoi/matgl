@@ -7,10 +7,12 @@ nav_order: 3
 # Change Log
 
 ## 4.0.1
-- **Intermediate features now exposed via ``model.feature_dict``.** ``MatGLModel`` subclasses (``TensorNet``,
-  ``M3GNet``, ``CHGNet``, ``QET``) populate a ``feature_dict`` instance attribute on every ``forward`` call.
-  The legacy ``return_all_layer_output`` (in ``forward``) and ``return_features`` (in ``predict_structure``)
-  kwargs are **deprecated** and emit a ``DeprecationWarning`` when used. They will be **removed in matgl v5**.
+- **Intermediate features now exposed via ``model.feature_dict``.** All ``MatGLModel`` subclasses
+  (``TensorNet``, ``M3GNet``, ``CHGNet``, ``QET``, ``MEGNet``, ``SO3Net``, ``GRACE``, and the
+  ``TransformedTargetModel`` wrapper) populate a ``feature_dict`` instance attribute on every
+  ``forward`` call. The legacy ``return_all_layer_output`` (``forward``) and ``return_features``
+  (in ``predict_structure`` for TensorNet / CHGNet / M3GNet, and in ``QET.__init__``) kwargs are
+  **deprecated** and emit a ``DeprecationWarning`` when used. They will be **removed in matgl v5**.
 
 ## 4.0.0
 - **DGL backend removed.** All DGL implementations have been deleted. matgl now targets PyTorch Geometric

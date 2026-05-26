@@ -129,6 +129,10 @@ class MEGNet(MatGLModel):
     def forward(self, g: Any, state_attr: torch.Tensor | None = None, **kwargs):
         """Forward pass of MEGNet (PyG).
 
+        Intermediate layer features are stored on ``self.feature_dict`` (keys
+        ``edge_attr``, ``embedding``, ``gc_<i>``, ``readout``, ``final``) and
+        overwritten on every call.
+
         Args:
             g: PyG ``Data`` (or ``Data``-like) object with attributes ``node_type``
                 (or ``z``), ``pos``, ``edge_index``, and optionally ``pbc_offshift``,
@@ -157,11 +161,16 @@ class MEGNet(MatGLModel):
         node_feat = self.node_encoder(node_feat)
         state_feat = self.state_encoder(state_feat)
 
+        fea_dict: dict = {
+            "edge_attr": edge_attr,
+            "embedding": {"node_feat": node_feat, "edge_feat": edge_feat, "state_feat": state_feat},
+        }
+
         # Ensure state_feat has a leading num_graphs dimension for the conv layers.
         if state_feat.dim() == 1:
             state_feat = state_feat.unsqueeze(0)
 
-        for block in self.blocks:
+        for i, block in enumerate(self.blocks):
             edge_feat, node_feat, state_feat = block(
                 edge_index,
                 edge_feat,
@@ -174,6 +183,11 @@ class MEGNet(MatGLModel):
             )
             if state_feat.dim() == 1:
                 state_feat = state_feat.unsqueeze(0)
+            fea_dict[f"gc_{i + 1}"] = {
+                "node_feat": node_feat,
+                "edge_feat": edge_feat,
+                "state_feat": state_feat,
+            }
 
         node_vec = self.node_s2s(node_feat, batch)
         edge_vec = self.edge_s2s(edge_feat, edge_batch, num_graphs=num_graphs)
@@ -183,6 +197,7 @@ class MEGNet(MatGLModel):
         state_vec = state_feat.view(num_graphs, -1)
 
         vec = torch.cat([node_vec, edge_vec, state_vec], dim=-1)
+        fea_dict["readout"] = vec
 
         if self.dropout:
             vec = self.dropout(vec)
@@ -191,7 +206,10 @@ class MEGNet(MatGLModel):
         if self.is_classification:
             output = torch.sigmoid(output)
 
-        return torch.squeeze(output)
+        output = torch.squeeze(output)
+        fea_dict["final"] = output
+        self.feature_dict = fea_dict
+        return output
 
     def predict_structure(
         self,

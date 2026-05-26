@@ -26,6 +26,7 @@ from matgl.layers import MLP
 from matgl.layers._readout_torch import WeightedReadOut
 from matgl.utils.maths import scatter_add
 
+from ._core import _warn_feature_dict_kwarg
 from ._tensornet import TensorNet
 
 if TYPE_CHECKING:
@@ -105,7 +106,10 @@ class QET(TensorNet):
             include_magmom (bool): Whether the magmom is returned (not implemented yet)
             is_hardness_envs (bool): Whether the hardness is environment dependent
             is_sigma_train (bool): Whether the sigma is trainable
-            return_features (bool): Whether the atomic features are returned
+            return_features (bool): **Deprecated.** Use ``model.feature_dict`` after the
+                forward call instead. Will be removed in matgl v5. When ``True`` the
+                model still returns ``(node_feat, atomic_energies)`` from ``forward`` for
+                backwards compatibility.
             use_warp (bool | None): Whether to use warp-accelerated kernels from ``nvalchemi-toolkit-ops``.
                 Same semantics as :class:`TensorNet`.
             **kwargs: For future flexibility. Not used at the moment.
@@ -116,6 +120,8 @@ class QET(TensorNet):
         # pass them through don't crash on duplicate kwargs.
         for legacy in ("is_intensive", "readout_type", "task_type", "field"):
             kwargs.pop(legacy, None)
+        if return_features:
+            _warn_feature_dict_kwarg("return_features")
         super().__init__(
             element_types=element_types,
             units=units,
@@ -185,6 +191,11 @@ class QET(TensorNet):
     ):
         """Forward pass for QET (PyG).
 
+        Intermediate features (TensorNet ``edge_attr``/``embedding``/``gc_<i>``/``readout``
+        plus QET-specific ``chi``, ``hardness``, ``sigma``, ``charge``, ``elec_pot``,
+        ``magmom`` (if enabled), ``node_feat``, ``atomic_energies``, ``final``) are stored
+        on ``self.feature_dict`` after every call.
+
         Args:
             g: PyG ``Data`` / ``Batch``-like object with ``node_type`` (or ``z``),
                 ``pos``, ``edge_index``, and optionally ``pbc_offshift``,
@@ -195,11 +206,10 @@ class QET(TensorNet):
             **kwargs: For future flexibility. Not used at the moment.
 
         Returns:
-            Per-graph total energy (or ``(node_feat, atomic_energies)`` when
-            ``return_features=True``).
+            Per-graph total energy (or ``(node_feat, atomic_energies)`` when the
+            deprecated ``return_features=True`` flag was set on the model).
         """
         fea_dict = self.forward_features(g, state_attr)
-        self.feature_dict = fea_dict
         x = fea_dict["readout"]
 
         chi = self.chi_readout(x).reshape(-1)
@@ -224,13 +234,25 @@ class QET(TensorNet):
         g.elec_pot = elec_pot
 
         feats = [x, charge.unsqueeze(dim=1), elec_pot.unsqueeze(dim=1)]
+        magmom = None
         if self.include_magmom:
             magmom = self.magmom_readout(x).reshape(-1)
             feats.append(magmom.unsqueeze(dim=1))
         node_feat = self.norm(torch.hstack(feats))
         atomic_energies = self.final_layer(node_feat)
 
+        fea_dict["chi"] = chi
+        fea_dict["hardness"] = hardness
+        fea_dict["sigma"] = sigma
+        fea_dict["charge"] = charge
+        fea_dict["elec_pot"] = elec_pot
+        if magmom is not None:
+            fea_dict["magmom"] = magmom
+        fea_dict["node_feat"] = node_feat
+        fea_dict["atomic_energies"] = atomic_energies
+
         if self.return_features:
+            self.feature_dict = fea_dict
             return node_feat, atomic_energies
 
         batch = getattr(g, "batch", None)
@@ -240,7 +262,10 @@ class QET(TensorNet):
         else:
             batch = batch.to(torch.long)
             num_graphs = int(getattr(g, "num_graphs", int(batch.max()) + 1))
-        return torch.squeeze(scatter_add(atomic_energies.squeeze(-1), batch, dim_size=num_graphs))
+        output = torch.squeeze(scatter_add(atomic_energies.squeeze(-1), batch, dim_size=num_graphs))
+        fea_dict["final"] = output
+        self.feature_dict = fea_dict
+        return output
 
     def predict_structure(  # type: ignore[override]
         self,

@@ -231,6 +231,10 @@ class SO3Net(MatGLModel):
     def forward(self, g: Any, total_charges: torch.Tensor | None = None, **kwargs):
         """Performs message passing and updates node representations.
 
+        Intermediate features (``embedding``, ``scalar_representation``,
+        ``vector_representation`` if computed, ``readout``, ``final``) are stored on
+        ``self.feature_dict`` after every call.
+
         Args:
             g: PyG ``Data``/``Batch`` with ``node_type`` (or ``z``), ``pos``,
                 ``edge_index``, and optionally ``pbc_offshift``, ``batch``,
@@ -264,9 +268,11 @@ class SO3Net(MatGLModel):
 
         x0 = self.embedding(atomic_numbers)[:, None]
 
+        fea_dict: dict = {"embedding": x0}
+
         x = so3.scalar2rsh(x0, int(self.lmax))
-        for so3conv, mixing1, mixing2, gating, mixing3 in zip(
-            self.so3convs, self.mixings1, self.mixings2, self.gatings, self.mixings3, strict=False
+        for i, (so3conv, mixing1, mixing2, gating, mixing3) in enumerate(
+            zip(self.so3convs, self.mixings1, self.mixings2, self.gatings, self.mixings3, strict=False)
         ):
             dx = so3conv(x, radial_ij, Yij, cutoff_ij, idx_i, idx_j)
             ddx = mixing1(dx)
@@ -275,6 +281,7 @@ class SO3Net(MatGLModel):
             dx = gating(dx)
             dx = mixing3(dx)
             x = x + dx
+            fea_dict[f"gc_{i + 1}"] = x
 
         scalar_representation = x[:, 0]
         if self.return_vector_representation or self.target_property == "polarizability":
@@ -283,6 +290,10 @@ class SO3Net(MatGLModel):
         else:
             vector_representation = None
 
+        fea_dict["scalar_representation"] = scalar_representation
+        if vector_representation is not None:
+            fea_dict["vector_representation"] = vector_representation
+
         batch, num_graphs = _resolve_batch(g, num_nodes=atomic_numbers.shape[0], device=atomic_numbers.device)
 
         if self.target_property == "atomwise":
@@ -290,8 +301,12 @@ class SO3Net(MatGLModel):
                 output = self.final_layer(scalar_representation)
             else:
                 atomic_properties = self.final_layer(scalar_representation)  # type: ignore[operator]
+                fea_dict["atomic_properties"] = atomic_properties
                 output = scatter_add(atomic_properties, batch, dim_size=num_graphs)
-            return torch.squeeze(output)
+            output = torch.squeeze(output)
+            fea_dict["final"] = output
+            self.feature_dict = fea_dict
+            return output
 
         if self.target_property == "graph":
             if self.is_intensive:
@@ -299,9 +314,12 @@ class SO3Net(MatGLModel):
                     node_vec = self.readout(scalar_representation, batch)
                 else:
                     node_vec = self.readout(scalar_representation, batch)  # type: ignore[operator]
+                fea_dict["readout"] = node_vec
                 output = self.final_layer(node_vec)
                 if self.task_type == "classification":
                     output = self.sigmoid(output)
+                fea_dict["final"] = output
+                self.feature_dict = fea_dict
                 return output
             raise NotImplementedError("target_property='graph' with is_intensive=False is not supported.")
 
@@ -328,7 +346,13 @@ class SO3Net(MatGLModel):
                 dipole_moment = scatter_add(dipole_moment, batch, dim_size=num_graphs)
                 if self.predict_dipole_magnitude:
                     dipole_moment = torch.norm(dipole_moment, dim=1, keepdim=False)
-            return torch.squeeze(charges), torch.squeeze(dipole_moment)
+            charges = torch.squeeze(charges)
+            dipole_moment = torch.squeeze(dipole_moment)
+            fea_dict["charges"] = charges
+            fea_dict["dipole_moment"] = dipole_moment
+            fea_dict["final"] = (charges, dipole_moment)
+            self.feature_dict = fea_dict
+            return charges, dipole_moment
 
         # polarizability
         assert vector_representation is not None
@@ -351,7 +375,10 @@ class SO3Net(MatGLModel):
         alpha = alpha + alpha_c
 
         alpha = scatter_add(alpha, batch, dim_size=num_graphs)
-        return torch.squeeze(alpha)
+        alpha = torch.squeeze(alpha)
+        fea_dict["final"] = alpha
+        self.feature_dict = fea_dict
+        return alpha
 
     def predict_structure(
         self,
