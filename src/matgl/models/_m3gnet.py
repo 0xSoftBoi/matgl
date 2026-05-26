@@ -33,7 +33,7 @@ from matgl.layers import (
 from matgl.layers._readout_torch import ReduceReadOut, WeightedAtomReadOut, WeightedReadOut
 from matgl.utils.cutoff import polynomial_cutoff
 
-from ._core import MatGLModel
+from ._core import MatGLModel, _warn_feature_dict_kwarg
 
 if TYPE_CHECKING:
     from matgl.graph._converters import GraphConverter
@@ -204,6 +204,9 @@ class M3GNet(MatGLModel):
     ):
         """Forward pass of M3GNet (PyG).
 
+        Intermediate layer features are always stored on ``self.feature_dict`` after
+        every call (overwritten on each forward).
+
         Args:
             g: PyG ``Data`` (or ``Data``-like) object with attributes
                 ``node_type`` (or ``z``), ``pos``, ``edge_index``, optionally
@@ -212,9 +215,12 @@ class M3GNet(MatGLModel):
             l_g: Cached line-graph bundle from
                 :func:`matgl.graph._compute.create_line_graph`. If ``None``,
                 a fresh one is built from ``g``.
-            return_all_layer_output: Whether to return all intermediate
-                features as a dict (useful for featurization).
+            return_all_layer_output: **Deprecated.** Use ``model.feature_dict`` after
+                the forward call instead. Will be removed in matgl v5. When ``True``
+                the feature dict is still returned for backwards compatibility.
         """
+        if return_all_layer_output:
+            _warn_feature_dict_kwarg("return_all_layer_output")
         node_types = getattr(g, "node_type", getattr(g, "z", None))
         pos = g.pos
         edge_index = g.edge_index
@@ -303,6 +309,7 @@ class M3GNet(MatGLModel):
                 output = output.index_add(0, batch.to(torch.long), atomic)
 
         fea_dict["final"] = output
+        self.feature_dict = fea_dict
         if return_all_layer_output:
             return fea_dict
         return torch.squeeze(output)
@@ -315,8 +322,20 @@ class M3GNet(MatGLModel):
         output_layers: list | None = None,
         return_features: bool = False,
     ):
-        """Convenience method to predict a property from a structure (PyG)."""
+        """Convenience method to predict a property from a structure (PyG).
+
+        Args:
+            structure: An input crystal/molecule.
+            state_feats: Optional state attributes.
+            graph_converter: Graph converter. Defaults to ``Structure2Graph``.
+            output_layers: Currently unused; kept for API symmetry with other models.
+            return_features: **Deprecated.** Use ``model.feature_dict`` after calling
+                ``predict_structure`` instead. Will be removed in matgl v5.
+        """
         import matgl
+
+        if return_features:
+            _warn_feature_dict_kwarg("return_features")
 
         if graph_converter is None:
             from matgl.ext._pymatgen import Structure2Graph
@@ -328,5 +347,6 @@ class M3GNet(MatGLModel):
         if state_feats is None:
             state_feats = torch.tensor(state_attr_default, dtype=matgl.float_th)
         if return_features:
-            return self(g=g, state_attr=state_feats, return_all_layer_output=True)
+            self(g=g, state_attr=state_feats)
+            return self.feature_dict
         return self(g=g, state_attr=state_feats).detach()

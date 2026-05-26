@@ -32,7 +32,7 @@ from matgl.layers._readout_torch import (
 )
 from matgl.utils.maths import decompose_tensor, scatter_add, tensor_norm
 
-from ._core import MatGLModel
+from ._core import MatGLModel, _warn_feature_dict_kwarg
 
 try:
     from matgl.layers._embedding_warp import TensorEmbedding as TensorEmbeddingWarp
@@ -327,17 +327,24 @@ class TensorNet(MatGLModel):
     ):
         """Forward pass for TensorNet (PyG).
 
+        Intermediate layer features are always stored on ``self.feature_dict`` after
+        every call (overwritten on each forward).
+
         Args:
             g: PyG Data object or dict with keys 'node_type'/'z', 'pos', 'edge_index',
                 and optionally 'pbc_offshift', 'batch', 'num_graphs'.
             state_attr: State attrs for a batch of graphs.
-            return_all_layer_output: Whether to return outputs of all intermediate layers.
+            return_all_layer_output: **Deprecated.** Use ``model.feature_dict`` after the
+                forward call instead. Will be removed in matgl v5. When ``True`` the
+                feature dict is still returned for backwards compatibility.
             **kwargs: For future flexibility. Not used at the moment.
 
         Returns:
             output: Output property for a batch of graphs, or a dict of layer outputs
-                when ``return_all_layer_output=True``.
+                when ``return_all_layer_output=True`` (deprecated).
         """
+        if return_all_layer_output:
+            _warn_feature_dict_kwarg("return_all_layer_output")
         fea_dict = self.forward_features(g=g, state_attr=state_attr)
         x = fea_dict["readout"]
         batch = getattr(g, "batch", None)
@@ -360,6 +367,7 @@ class TensorNet(MatGLModel):
                 output = scatter_add(atomic_energies, batch_long, dim_size=num_graphs)  # type: ignore[arg-type]
 
         fea_dict["final"] = output
+        self.feature_dict = fea_dict
         if return_all_layer_output:
             return fea_dict
         return output
@@ -379,11 +387,15 @@ class TensorNet(MatGLModel):
             state_feats (torch.tensor): Graph attributes
             graph_converter: Object that implements a get_graph_from_structure.
             output_layers: List of names for the layer of GNN as output.
-            return_features (bool): If True, return specified layer outputs. If False, only return final output.
+            return_features (bool): **Deprecated.** Use ``model.feature_dict`` after
+                calling ``predict_structure`` instead. Will be removed in matgl v5.
+                If True, return specified layer outputs. If False, only return final output.
 
         Returns:
             output (torch.tensor): output property
         """
+        if return_features:
+            _warn_feature_dict_kwarg("return_features")
         allowed_output_layers = ["edge_attr", "embedding", "readout", "final"] + [
             f"gc_{i + 1}" for i in range(self.num_layers)
         ]
@@ -406,10 +418,10 @@ class TensorNet(MatGLModel):
             state_feats = torch.tensor(state_feats_default)
 
         if return_features:
-            model_output = self(g=g, state_attr=state_feats, return_all_layer_output=True)
+            self(g=g, state_attr=state_feats)
             return {
                 k: v.detach() if isinstance(v, torch.Tensor) else v
-                for k, v in model_output.items()
+                for k, v in self.feature_dict.items()
                 if k in output_layers
             }
 

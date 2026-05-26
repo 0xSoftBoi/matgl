@@ -460,8 +460,8 @@ class TensorNetWrapper(nn.Module, BaseModelMixin):  # type: ignore[misc]
             num_graphs=inputs["num_graphs"],
         )
 
-        fea_dict = self.model(g=g, return_all_layer_output=True)
-        node_embeddings = fea_dict["readout"]  # [V, units]
+        self.model(g=g)
+        node_embeddings = self.model.feature_dict["readout"]  # [V, units]
 
         units = node_embeddings.shape[-1]
         graph_embeddings = torch.zeros(

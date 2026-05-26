@@ -199,6 +199,7 @@ class QET(TensorNet):
             ``return_features=True``).
         """
         fea_dict = self.forward_features(g, state_attr)
+        self.feature_dict = fea_dict
         x = fea_dict["readout"]
 
         chi = self.chi_readout(x).reshape(-1)

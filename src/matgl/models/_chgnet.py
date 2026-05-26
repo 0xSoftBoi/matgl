@@ -37,7 +37,7 @@ from matgl.layers._graph_convolution import (
 from matgl.utils.cutoff import polynomial_cutoff
 from matgl.utils.maths import scatter_add
 
-from ._core import MatGLModel
+from ._core import MatGLModel, _warn_feature_dict_kwarg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -299,6 +299,9 @@ class CHGNet(MatGLModel):
     ) -> torch.Tensor | dict:
         """Forward pass.
 
+        Intermediate layer features are always stored on ``self.feature_dict`` after
+        every call (overwritten on each forward).
+
         Args:
             g: PyG ``Data`` graph. Must have ``pos``, ``edge_index``,
                 ``pbc_offshift``, ``node_type``, and optionally ``batch``.
@@ -306,12 +309,16 @@ class CHGNet(MatGLModel):
             l_g: Pre-built line graph (ignored — line graph is always rebuilt from
                 current positions to maintain gradient flow). Kept for API compatibility
                 with ``_pes.Potential``.
-            return_all_layer_output: Return intermediate features. Default = False.
+            return_all_layer_output: **Deprecated.** Use ``model.feature_dict`` after the
+                forward call instead. Will be removed in matgl v5. When ``True`` the
+                feature dict is still returned for backwards compatibility.
 
         Returns:
             Structure-level property tensor, or feature dict when
-            ``return_all_layer_output=True``.
+            ``return_all_layer_output=True`` (deprecated).
         """
+        if return_all_layer_output:
+            _warn_feature_dict_kwarg("return_all_layer_output")
         edge_index = g.edge_index
         pos = g.pos
         pbc_offshift = getattr(g, "pbc_offshift", None)
@@ -471,6 +478,7 @@ class CHGNet(MatGLModel):
         structure_properties = torch.squeeze(structure_properties)
         fea_dict["final"] = structure_properties
 
+        self.feature_dict = fea_dict
         if return_all_layer_output:
             return fea_dict
         return structure_properties
@@ -507,12 +515,15 @@ class CHGNet(MatGLModel):
             structure: Pymatgen Structure or Molecule.
             state_feats: Optional state attributes.
             graph_converter: Graph converter. Defaults to ``Structure2Graph``.
-            return_features: Return intermediate features. Default = False.
+            return_features: **Deprecated.** Use ``model.feature_dict`` after calling
+                ``predict_structure`` instead. Will be removed in matgl v5.
             output_layers: Layer names to return (used when return_features=True).
 
         Returns:
             Predicted property tensor, or feature dict.
         """
+        if return_features:
+            _warn_feature_dict_kwarg("return_features")
         allowed_output_layers = ["bond_expansion", "angle_expansion", "embedding", "magmom", "final"] + [
             f"gc_{i + 1}" for i in range(self.n_blocks)
         ]
@@ -536,7 +547,7 @@ class CHGNet(MatGLModel):
             state_feats = torch.tensor(state_feats_default)
 
         if return_features:
-            model_output = self(g=g, state_attr=state_feats, return_all_layer_output=True)
-            return {k: v for k, v in model_output.items() if k in output_layers}
+            self(g=g, state_attr=state_feats)
+            return {k: v for k, v in self.feature_dict.items() if k in output_layers}
 
         return self(g=g, state_attr=state_feats).detach()
