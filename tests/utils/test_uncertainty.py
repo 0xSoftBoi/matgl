@@ -52,6 +52,13 @@ class TestMCDropoutWrapperConstruction:
         wrapper = MCDropoutWrapper(model, dropout_p=0.1)
         assert len(wrapper._stochastic_modules) > 0
 
+    def test_m3gnet_extensive_raises(self):
+        """M3GNet with is_intensive=False uses WeightedReadOut (GatedMLP), which has no injectable
+        dropout site compatible with MC Dropout. Verify this raises rather than silently misbehaves."""
+        model = M3GNet(element_types=("Mo", "S"), is_intensive=False)
+        with pytest.raises(ValueError, match="No dropout layers found"):
+            MCDropoutWrapper(model, dropout_p=0.1)
+
     def test_invalid_dropout_p_zero(self):
         model = CHGNet(element_types=("Mo", "S"))
         with pytest.raises(ValueError, match="dropout_p must be in"):
@@ -123,3 +130,9 @@ class TestPredictUncertainty:
         wrapper = MCDropoutWrapper(model, dropout_p=0.1)
         mean, _ = wrapper.predict_uncertainty(mos_structure, n_passes=5)
         assert torch.isfinite(mean)
+
+    def test_n_passes_one_raises(self, mos_structure):
+        model = CHGNet(element_types=("Mo", "S"), final_dropout=0.1)
+        wrapper = MCDropoutWrapper(model, dropout_p=0.1)
+        with pytest.raises(ValueError, match="n_passes must be"):
+            wrapper.predict_uncertainty(mos_structure, n_passes=1)

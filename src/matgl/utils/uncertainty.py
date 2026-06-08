@@ -31,9 +31,9 @@ if TYPE_CHECKING:
     from matgl.models._core import MatGLModel
 
 # Readout attribute names searched by default:
-#   CHGNet     → final_dropout (nn.Identity placeholder), final_layer
-#   M3GNet     → final_layer (MLP, injectable when is_intensive=True)
-#   TensorNet  → final_layer
+#   CHGNet      → final_dropout (nn.Identity placeholder when p=0), final_layer
+#   M3GNet      → final_layer (MLP when is_intensive=True; WeightedReadOut otherwise — unsupported)
+#   TensorNet   → final_layer
 _DEFAULT_READOUT_ATTRS: tuple[str, ...] = ("final_dropout", "final_layer")
 
 
@@ -89,18 +89,12 @@ class MCDropoutWrapper:
         dropout_p: float = 0.1,
         readout_attrs: Sequence[str] = _DEFAULT_READOUT_ATTRS,
     ) -> None:
-        """Initialise MCDropoutWrapper and inject dropout into the model's readout layers."""
+        """Inject MC Dropout into *model*'s readout layers and store the stochastic modules."""
         if not 0.0 < dropout_p < 1.0:
             raise ValueError(f"dropout_p must be in (0, 1), got {dropout_p}")
 
         self.model = model
         self.dropout_p = dropout_p
-
-        # Collect the dropout modules that will be set to train() during inference.
-        # For each named readout attribute:
-        #   - nn.Dropout  → update p in place
-        #   - nn.Identity → replace with nn.Dropout (CHGNet default: final_dropout=0)
-        #   - other nn.Module → recurse into children looking for nn.Dropout
         self._stochastic_modules: list[nn.Dropout] = []
 
         for attr in readout_attrs:
@@ -181,14 +175,14 @@ class MCDropoutWrapper:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Run N stochastic forward passes and return predictive mean and std.
 
-        Each structure is converted to a graph exactly once; the N forward passes
-        reuse the cached graph, so the cost scales as O(N · n_passes) not
-        O(N · n_passes · conversion_time).
+        All structures are batched into a single PyG ``Batch`` per pass, so cost
+        scales as O(n_passes) forward calls rather than O(N · n_passes). Graph
+        conversion still happens exactly once per structure.
 
         Args:
             structures: A single or list of pymatgen ``Structure`` / ``Molecule``.
-            n_passes: Number of stochastic forward passes. Increase for tighter
-                uncertainty estimates at the cost of compute. Default = 20.
+            n_passes: Number of stochastic forward passes. Must be ≥ 2. Increase
+                for tighter uncertainty estimates at the cost of compute. Default = 20.
             graph_converter: Optional graph converter. If ``None``, uses the
                 model's default ``Structure2Graph`` (requires ``model.element_types``
                 and ``model.cutoff`` attributes, present on all standard MatGL models).
@@ -198,23 +192,30 @@ class MCDropoutWrapper:
                 multi-target models) with the per-structure predictive mean.
             std:  Float tensor of the same shape with the per-structure predictive
                 standard deviation.
+
+        Raises:
+            ValueError: If ``n_passes < 2`` (std of a single sample is undefined).
         """
         from pymatgen.core import Molecule as _Molecule
         from pymatgen.core import Structure as _Structure
+        from torch_geometric.data import Batch as _Batch
+
+        if n_passes < 2:
+            raise ValueError(f"n_passes must be ≥ 2, got {n_passes}")
 
         single = isinstance(structures, (_Structure, _Molecule))
         if single:
             structures = [structures]
 
         graphs = [self._to_graph(s, graph_converter) for s in structures]
+        batch = _Batch.from_data_list([g for g, _ in graphs])
+        sfs = [sf for _, sf in graphs]
+        batch_sf = torch.stack(sfs) if sfs[0].numel() > 0 else None
 
-        pass_results: list[torch.Tensor] = []
         with self._stochastic_mode(), torch.no_grad():
-            for _ in range(n_passes):
-                preds = [self.model(g=g, state_attr=sf).squeeze() for g, sf in graphs]
-                pass_results.append(torch.stack(preds))
+            samples = [self.model(g=batch, state_attr=batch_sf) for _ in range(n_passes)]
 
-        stacked = torch.stack(pass_results)  # (n_passes, N) or (n_passes, N, ntargets)
+        stacked = torch.stack(samples)  # (n_passes, N) or (n_passes, N, ntargets)
         mean, std = stacked.mean(dim=0), stacked.std(dim=0)
         if single:
             return mean.squeeze(0), std.squeeze(0)
