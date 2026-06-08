@@ -46,8 +46,9 @@ class TestMCDropoutWrapperConstruction:
         assert isinstance(model.final_dropout, torch.nn.Dropout)
         assert model.final_dropout.p == pytest.approx(0.1)
 
-    def test_m3gnet_wraps(self, mos_structure):
-        model = M3GNet(element_types=("Mo", "S"), is_intensive=False)
+    def test_m3gnet_wraps(self):
+        """M3GNet with is_intensive=True uses an MLP final_layer that Dropout can be injected into."""
+        model = M3GNet(element_types=("Mo", "S"), is_intensive=True)
         wrapper = MCDropoutWrapper(model, dropout_p=0.1)
         assert len(wrapper._stochastic_modules) > 0
 
@@ -111,7 +112,7 @@ class TestPredictUncertainty:
             assert not m.training, f"{m} still in training mode after predict_uncertainty"
 
     def test_m3gnet_uncertainty(self, mos_structure):
-        model = M3GNet(element_types=("Mo", "S"), is_intensive=False)
+        model = M3GNet(element_types=("Mo", "S"), is_intensive=True)
         wrapper = MCDropoutWrapper(model, dropout_p=0.1)
         mean, std = wrapper.predict_uncertainty(mos_structure, n_passes=5)
         assert torch.isfinite(mean)

@@ -30,11 +30,28 @@ if TYPE_CHECKING:
     from matgl.graph._converters import GraphConverter
     from matgl.models._core import MatGLModel
 
-# Readout attribute names common across MatGL model architectures:
-#   CHGNet  → final_layer, final_dropout
-#   M3GNet  → final_layer
-#   TensorNet → final_layer
+# Readout attribute names searched by default:
+#   CHGNet     → final_dropout (nn.Identity placeholder), final_layer
+#   M3GNet     → final_layer (MLP, injectable when is_intensive=True)
+#   TensorNet  → final_layer
 _DEFAULT_READOUT_ATTRS: tuple[str, ...] = ("final_dropout", "final_layer")
+
+
+def _inject_dropout(module: nn.Module, p: float) -> nn.Dropout | None:
+    """Append an ``nn.Dropout`` to the first ``layers`` ModuleList/Sequential in *module*.
+
+    Works for ``MLP`` (``MLP.layers`` is a ``ModuleList`` whose ``forward`` iterates
+    linearly) so the injected dropout runs after the final ``Linear``.
+
+    Returns the new ``Dropout`` on success, ``None`` if no suitable ``layers``
+    attribute was found.
+    """
+    layers = getattr(module, "layers", None)
+    if isinstance(layers, (nn.ModuleList, nn.Sequential)):
+        drop = nn.Dropout(p)
+        layers.append(drop)
+        return drop
+    return None
 
 
 class MCDropoutWrapper:
@@ -87,6 +104,11 @@ class MCDropoutWrapper:
         self._stochastic_modules: list[nn.Dropout] = []
 
         for attr in readout_attrs:
+            if self._stochastic_modules:
+                # Already wired up dropout from an earlier attr; stop so we don't
+                # accidentally mutate a downstream module (e.g. CHGNet's final_layer
+                # uses indexed layers[-1] access, so appending there would corrupt it).
+                break
             readout_module = getattr(model, attr, None)
             if readout_module is None:
                 continue
@@ -94,11 +116,19 @@ class MCDropoutWrapper:
                 new_drop = nn.Dropout(p=dropout_p)
                 setattr(model, attr, new_drop)
                 self._stochastic_modules.append(new_drop)
+            elif isinstance(readout_module, nn.Dropout):
+                readout_module.p = dropout_p
+                self._stochastic_modules.append(readout_module)
             else:
-                for sub in readout_module.modules():
-                    if isinstance(sub, nn.Dropout):
-                        sub.p = dropout_p
-                        self._stochastic_modules.append(sub)
+                found = [m for m in readout_module.modules() if isinstance(m, nn.Dropout)]
+                if found:
+                    for m in found:
+                        m.p = dropout_p
+                    self._stochastic_modules.extend(found)
+                else:
+                    injected = _inject_dropout(readout_module, dropout_p)
+                    if injected is not None:
+                        self._stochastic_modules.append(injected)
 
         if not self._stochastic_modules:
             raise ValueError(
@@ -129,8 +159,6 @@ class MCDropoutWrapper:
         ``predict_structure`` implementations so we can convert each structure
         once and reuse the graph across all N forward passes.
         """
-        import matgl
-
         if graph_converter is None:
             from matgl.ext.pymatgen import Structure2Graph
 
@@ -142,7 +170,7 @@ class MCDropoutWrapper:
         g, lat, state_feats_default = graph_converter.get_graph(structure)
         g.pbc_offshift = torch.matmul(g.pbc_offset, lat[0])
         g.pos = g.frac_coords @ lat[0]
-        state_feats = torch.tensor(state_feats_default, dtype=matgl.float_th)
+        state_feats = torch.tensor(state_feats_default)
         return g, state_feats
 
     def predict_uncertainty(
@@ -174,7 +202,8 @@ class MCDropoutWrapper:
         from pymatgen.core import Molecule as _Molecule
         from pymatgen.core import Structure as _Structure
 
-        if isinstance(structures, (_Structure, _Molecule)):
+        single = isinstance(structures, (_Structure, _Molecule))
+        if single:
             structures = [structures]
 
         graphs = [self._to_graph(s, graph_converter) for s in structures]
@@ -186,4 +215,7 @@ class MCDropoutWrapper:
                 pass_results.append(torch.stack(preds))
 
         stacked = torch.stack(pass_results)  # (n_passes, N) or (n_passes, N, ntargets)
-        return stacked.mean(dim=0), stacked.std(dim=0)
+        mean, std = stacked.mean(dim=0), stacked.std(dim=0)
+        if single:
+            return mean.squeeze(0), std.squeeze(0)
+        return mean, std
