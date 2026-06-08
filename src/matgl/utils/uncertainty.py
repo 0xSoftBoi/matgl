@@ -69,18 +69,6 @@ class MCDropoutWrapper:
         >>> wrapper = MCDropoutWrapper(model, dropout_p=0.1)
         >>> structures = [...]  # list of pymatgen Structure objects
         >>> mean, std = wrapper.predict_uncertainty(structures, n_passes=20)
-
-    Args:
-        model: Any pretrained ``MatGLModel`` (CHGNet, M3GNet, TensorNet, …).
-        dropout_p: Dropout probability to inject into readout layers. Default = 0.1.
-        readout_attrs: Attribute names on ``model`` to search for dropout layers.
-            Defaults to ``("final_dropout", "final_layer")``. Override when using
-            a custom architecture with differently-named readout modules.
-
-    Raises:
-        ValueError: If no dropout layers are found within the specified readout
-            attributes and none can be injected (i.e. there are no ``nn.Identity``
-            placeholders to replace).
     """
 
     def __init__(
@@ -89,7 +77,20 @@ class MCDropoutWrapper:
         dropout_p: float = 0.1,
         readout_attrs: Sequence[str] = _DEFAULT_READOUT_ATTRS,
     ) -> None:
-        """Inject MC Dropout into *model*'s readout layers and store the stochastic modules."""
+        """Initialise MCDropoutWrapper and inject dropout into the model's readout layers.
+
+        Args:
+            model: Any pretrained ``MatGLModel`` (CHGNet, M3GNet, TensorNet, …).
+            dropout_p: Dropout probability to inject into readout layers. Default = 0.1.
+            readout_attrs: Attribute names on ``model`` to search for dropout layers.
+                Defaults to ``("final_dropout", "final_layer")``. Override when using
+                a custom architecture with differently-named readout modules.
+
+        Raises:
+            ValueError: If no dropout layers are found within the specified readout
+                attributes and none can be injected (i.e. there are no ``nn.Identity``
+                placeholders to replace).
+        """
         if not 0.0 < dropout_p < 1.0:
             raise ValueError(f"dropout_p must be in (0, 1), got {dropout_p}")
 
