@@ -158,8 +158,8 @@ class MCDropoutWrapper:
             from matgl.ext.pymatgen import Structure2Graph
 
             graph_converter = Structure2Graph(
-                element_types=self.model.element_types,  # type: ignore[attr-defined]
-                cutoff=self.model.cutoff,  # type: ignore[attr-defined]
+                element_types=self.model.element_types,  # type: ignore[attr-defined, arg-type]
+                cutoff=self.model.cutoff,  # type: ignore[attr-defined, arg-type]
             )
 
         g, lat, state_feats_default = graph_converter.get_graph(structure)
