@@ -9,6 +9,9 @@ jitted ``(E, forces, stress)`` function. It plugs straight into matgl's
 
 from __future__ import annotations
 
+import logging
+import math
+
 import jax.numpy as jnp
 import numpy as np
 from ase import units
@@ -20,6 +23,8 @@ from matgl.ext.ase import Atoms2Graph
 from ._convert import convert_potential
 from ._pad import next_bucket, pad_graph
 from ._potential import make_potential_fn
+
+logger = logging.getLogger(__name__)
 
 
 class JAXPESCalculator(Calculator):
@@ -66,6 +71,22 @@ class JAXPESCalculator(Calculator):
         else:
             raise ValueError(f"stress_unit must be 'GPa' or 'eV/A3', got {stress_unit!r}")
         self.conversion_factor = cf * stress_weight
+        if self.conversion_factor == 1.0:
+            logger.warning(
+                "The stress unit is now in GPa. Please set stress_unit='eV/A3' "
+                "if you want to use JAXPESCalculator for other ASE applications."
+            )
+        elif math.isclose(
+            self.conversion_factor, units.GPa / (units.eV / units.Angstrom**3), rel_tol=1e-4, abs_tol=1e-6
+        ):
+            logger.info("The stress unit is now in eV/A^3, which is the correct unit for an ASE Calculator.")
+        else:
+            raise ValueError(
+                "Error: Invalid stress unit configuration: stress_weight corresponds to neither "
+                "GPa nor eV/A^3. This is likely caused by setting both stress_unit and "
+                "stress_weight. Please set stress_unit to 'GPa' or 'eV/A3' and "
+                "stress_weight to 1.0."
+            )
         self.use_voigt = use_voigt
 
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
