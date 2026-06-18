@@ -6,6 +6,19 @@ nav_order: 3
 
 # Change Log
 
+## Unreleased
+- **New: `matgl.utils.MCDropoutWrapper` for uncertainty-aware inference.** Enables Monte Carlo Dropout
+  (Gal & Ghahramani, 2016) on any pretrained MatGL model (CHGNet, M3GNet, TensorNet, …) without
+  retraining: the backbone stays in `eval()` while only the readout dropout is sampled, and
+  `predict_uncertainty(structures, n_passes)` returns per-structure `(mean, std)` for acquisition
+  functions such as UCB (`mean - lambda * std`). See issue #800.
+- **Perf: backbone-once fast path for `predict_uncertainty` (`cache_backbone=True`, default).** Since
+  MC Dropout only perturbs the readout, the deterministic backbone is evaluated once and only the
+  cheap stochastic head is replayed `n_passes` times (vectorised), giving an ~`n_passes`× speed-up
+  (~19× at `n_passes=20` on M3GNet, GPU). Numerically equivalent to the naive loop; engaged only when
+  a probe proves the head is the model's terminal op, otherwise falls back automatically (e.g. CHGNet,
+  which pools after dropout).
+
 ## 4.0.2
 - **Bug fix: charges restored for charge-predicting potentials (QET) in the ASE calculators.**
   `PESCalculator.get_charges()` raised `PropertyNotImplementedError` because the PyG calculator never

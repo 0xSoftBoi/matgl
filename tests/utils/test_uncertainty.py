@@ -136,3 +136,58 @@ class TestPredictUncertainty:
         wrapper = MCDropoutWrapper(model, dropout_p=0.1)
         with pytest.raises(ValueError, match="n_passes must be"):
             wrapper.predict_uncertainty(mos_structure, n_passes=1)
+
+
+# ---------------------------------------------------------------------------
+# MCDropoutWrapper — backbone-once fast path (cache_backbone)
+# ---------------------------------------------------------------------------
+
+
+def _batch_for(wrapper, structures):
+    from torch_geometric.data import Batch
+
+    graphs = [wrapper._to_graph(s, None) for s in structures]
+    batch = Batch.from_data_list([g for g, _ in graphs])
+    sfs = [sf for _, sf in graphs]
+    return batch, (torch.stack(sfs) if sfs[0].numel() > 0 else None)
+
+
+class TestCacheBackbone:
+    def test_m3gnet_fast_path_is_used(self, mos_structure, fe_structure):
+        """M3GNet (intensive) readout is terminal, so the cached path must engage."""
+        model = M3GNet(element_types=("Mo", "S", "Fe"), is_intensive=True)
+        wrapper = MCDropoutWrapper(model, dropout_p=0.1)
+        batch, bsf = _batch_for(wrapper, [mos_structure, fe_structure])
+        assert wrapper._predict_cached(batch, bsf, 4) is not None
+
+    def test_chgnet_falls_back(self, mos_structure):
+        """CHGNet pools *after* dropout, so the head is not terminal -> fallback (None)."""
+        model = CHGNet(element_types=("Mo", "S"), final_dropout=0.0)
+        wrapper = MCDropoutWrapper(model, dropout_p=0.1)
+        batch, bsf = _batch_for(wrapper, [mos_structure])
+        assert wrapper._predict_cached(batch, bsf, 4) is None
+        # public API still works via the naive fallback
+        mean, std = wrapper.predict_uncertainty(mos_structure, n_passes=5)
+        assert torch.isfinite(mean)
+        assert std >= 0.0
+
+    def test_cached_equals_naive(self, mos_structure, fe_structure):
+        """With near-zero dropout both paths collapse to the deterministic prediction,
+        so the fast path must match the naive loop tightly (exactness of head replay)."""
+        model = M3GNet(element_types=("Mo", "S", "Fe"), is_intensive=True)
+        wrapper = MCDropoutWrapper(model, dropout_p=1e-6)
+        structs = [mos_structure, fe_structure]
+        m_fast, _ = wrapper.predict_uncertainty(structs, n_passes=8, cache_backbone=True)
+        m_slow, _ = wrapper.predict_uncertainty(structs, n_passes=8, cache_backbone=False)
+        assert torch.allclose(m_fast, m_slow, atol=1e-4)
+
+    def test_cached_shapes_match_naive(self, mos_structure, fe_structure):
+        model = M3GNet(element_types=("Mo", "S", "Fe"), is_intensive=True)
+        wrapper = MCDropoutWrapper(model, dropout_p=0.1)
+        structs = [mos_structure, fe_structure]
+        m_fast, s_fast = wrapper.predict_uncertainty(structs, n_passes=5, cache_backbone=True)
+        m_slow, s_slow = wrapper.predict_uncertainty(structs, n_passes=5, cache_backbone=False)
+        assert m_fast.shape == m_slow.shape == torch.Size([2])
+        assert s_fast.shape == s_slow.shape == torch.Size([2])
+        assert torch.isfinite(m_fast).all()
+        assert (s_fast >= 0).all()
